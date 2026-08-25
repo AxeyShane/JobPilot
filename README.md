@@ -274,6 +274,23 @@ submit - is what delivers.
 
 ---
 
+## Building from source / publishing
+
+See **[BUILDING.md](BUILDING.md)** for the full build, test, and PyPI
+publish walkthrough (wheel + sdist, local install, 74-test suite, OIDC
+trusted publishing via GitHub Actions, manual `twine` alternative).
+
+Short version:
+
+```bash
+pip install build twine
+python -m build                 # dist/job_pilot_ai-*.whl + .tar.gz
+pip install dist/job_pilot_ai-0.4.0-py3-none-any.whl
+jobpilot --help                 # verify new commands present
+python -m pytest tests/ -v      # 74 tests
+git tag v0.4.0 && git push origin v0.4.0   # CI auto-publishes to PyPI
+```
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, coding standards, and PR guidelines.
