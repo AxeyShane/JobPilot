@@ -27,9 +27,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from jobpilot.config import DB_PATH
 
@@ -78,16 +78,16 @@ CREATE TABLE IF NOT EXISTS outcomes (
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
-def _connect(db_path: Optional[Path | str] = None) -> sqlite3.Connection:
+def _connect(db_path: Path | str | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path or DB_PATH))
     conn.row_factory = sqlite3.Row
     return conn
 
 
-def _normalize_status(raw: Optional[str]) -> Optional[str]:
+def _normalize_status(raw: str | None) -> str | None:
     """Map any accepted spelling onto its canonical OUTCOME_STATUSES value."""
     if raw is None:
         return None
@@ -99,8 +99,8 @@ def _normalize_status(raw: Optional[str]) -> Optional[str]:
 # A) Schema + persistence
 # ---------------------------------------------------------------------------
 
-def init_outcomes(conn: Optional[sqlite3.Connection] = None,
-                  db_path: Optional[Path | str] = None) -> sqlite3.Connection:
+def init_outcomes(conn: sqlite3.Connection | None = None,
+                  db_path: Path | str | None = None) -> sqlite3.Connection:
     """Idempotent migration creating the ``outcomes`` table.
 
     Uses CREATE TABLE IF NOT EXISTS, so it is safe to call on every startup.
@@ -114,7 +114,7 @@ def init_outcomes(conn: Optional[sqlite3.Connection] = None,
     return conn
 
 
-def record_outcome(conn: Optional[sqlite3.Connection],
+def record_outcome(conn: sqlite3.Connection | None,
                    url: str,
                    **fields: Any) -> dict:
     """Upsert a single outcome row for a job URL. Returns the stored row.
@@ -155,7 +155,7 @@ def record_outcome(conn: Optional[sqlite3.Connection],
     return row
 
 
-def get_outcome(conn: Optional[sqlite3.Connection], url: str) -> Optional[dict]:
+def get_outcome(conn: sqlite3.Connection | None, url: str) -> dict | None:
     """Return the (normalized) outcome row for ``url``, or None."""
     conn = conn or _connect()
     row = conn.execute("SELECT * FROM outcomes WHERE url = ?", (url,)).fetchone()
@@ -166,7 +166,7 @@ def get_outcome(conn: Optional[sqlite3.Connection], url: str) -> Optional[dict]:
     return d
 
 
-def outcomes_summary(conn: Optional[sqlite3.Connection] = None) -> dict:
+def outcomes_summary(conn: sqlite3.Connection | None = None) -> dict:
     """Return outcome counts keyed by canonical status, plus ``total``.
 
     Counts are normalised through :func:`_normalize_status`, so rows written as
@@ -259,7 +259,7 @@ def detect_from_signal(signal_text: str, role_label: str = "") -> dict:
     }
 
 
-def promote_draft(conn: Optional[sqlite3.Connection] | None,
+def promote_draft(conn: sqlite3.Connection | None,
                   url: str, signal: str) -> bool:
     """Turn an ack-signal into a real application (drafts never count as replied).
 
@@ -287,7 +287,7 @@ def promote_draft(conn: Optional[sqlite3.Connection] | None,
 # B) Recalibration: aggregate trainer lessons from outcomes + job scores
 # ---------------------------------------------------------------------------
 
-def recalibrate(conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+def recalibrate(conn: sqlite3.Connection | None = None) -> list[dict]:
     """Aggregate outcome feedback into per-score-band trainer "lessons".
 
     Joins outcomes to jobs on URL to get each outcome's fit_score, groups them

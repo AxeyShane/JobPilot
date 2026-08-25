@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import asdict, dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 _WS = re.compile(r"\s+")
 
@@ -28,7 +28,7 @@ def _norm(text: str) -> str:
     return _WS.sub(" ", (text or "").lower()).strip()
 
 
-def _quote_sentence(text: str, snippet: str, max_chars: int = 240) -> Optional[str]:
+def _quote_sentence(text: str, snippet: str, max_chars: int = 240) -> str | None:
     """Return the sentence of ``text`` containing ``snippet``, verbatim (trimmed)."""
     text = text or ""
     m = re.search(re.escape(snippet), text, re.IGNORECASE)
@@ -76,7 +76,7 @@ class EligibilityGateVerdict:
     gate: str = "eligibility"
     verdict: str = ""            # PASS | FAIL | PROCEED | UNVERIFIED
     reason: str = ""
-    quoted: Optional[str] = None
+    quoted: str | None = None
     details: str = ""
 
 
@@ -229,6 +229,11 @@ def _extract_language_requirements(text: str) -> list[dict[str, Any]]:
 _DEFAULT_LANGUAGES = [
     "english", "spanish", "french", "german", "mandarin", "chinese", "japanese",
     "portuguese", "italian", "dutch", "russian", "arabic", "korean", "hindi",
+    "polish", "turkish", "swedish", "norwegian", "danish", "finnish", "greek",
+    "czech", "hebrew", "thai", "vietnamese", "indonesian", "malay", "ukrainian",
+    "romanian", "hungarian", "catalan", "filipino", "tagalog", "persian", "farsi",
+    "urdu", "bengali", "swahili", "dutch", "german", "french", "cantonese",
+    "welsh", "gaelic", "latin",
 ]
 
 
@@ -273,7 +278,7 @@ def evaluate_language(text: str, languages: list) -> dict:
     reqs = _extract_language_requirements(text)
     cand = _candidate_language_map(languages)
     details: list[dict[str, Any]] = []
-    hard_fail: Optional[str] = None
+    hard_fail: str | None = None
 
     for r in reqs:
         name = r["name"].lower()
@@ -310,5 +315,10 @@ def evaluate_language(text: str, languages: list) -> dict:
     ))
 
 
-__all__ = ["evaluate_eligibility", "evaluate_language", "EligibilityGateVerdict",
-           "LanguageGateVerdict", "asdict"]
+__all__ = [
+    "EligibilityGateVerdict",
+    "LanguageGateVerdict",
+    "asdict",
+    "evaluate_eligibility",
+    "evaluate_language",
+]

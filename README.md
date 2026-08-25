@@ -42,6 +42,28 @@ jobpilot apply --dry-run  # fill forms without submitting
 
 ---
 
+
+## What's new in JobPilot (vs ApplyPilot)
+
+JobPilot is the ApplyPilot fork that adds a *discipline layer* on top of the
+autonomous pipeline — the parts that turn raw volume into results you can
+trust and learn from. The core ideas come from the open-source
+`ai-job-search` framework (MadsLorentzen, MIT) and its release history.
+
+| Capability | What it does |
+|------------|--------------|
+| **Hard pre-score gates** (`gate`) | Eligibility gate (citizenship/PR/clearance read verbatim; a hard stop, never silently dropped) + language gate (undeclared required language = fail; a bar above your level = flagged, human decides). Run before any scoring. |
+| **Dimensioned, explainable scoring** (`score-dims`) | Replaces the opaque 1-10 with five 0-100 dimensions (technical, experience, behavioral/culture, career alignment, preferences/deal-breakers), each with a rubric + rationale. Deal-breakers veto outright. |
+| **Closed outcome loop** (`outcome`) | Records real results (drafted/applied/waiting/interview/offer/rejected...), promotes drafted→applied on an acknowledgement, and `--recalibrate` feeds what actually got replies back into scoring. Single source of truth for status vocabulary. |
+| **Document-quality checks** | ATS/PDF text-layer verification (catches the en-dash date bug that breaks ATS parsing), honest keyword gap reporting (never stuffs), and a second-pass reviewer critique. |
+| **Untrusted-input security** | Postings are treated as data, never instructions: injection phrases, embedded URLs, and base64/hex blobs are stripped so a hostile job ad cannot steer the agent. |
+| **Interview prep** (`interview`) | Company brief, likely questions, STAR bridge (honest — gaps get bridge notes, never invented experience). |
+| **Skill-gap + learning plan** (`upskill`) | Analyzes gaps between your profile and target postings, then builds a prioritized learning plan. |
+
+> The autonomous execution engine (discovery → enrich → score → tailor →
+> cover → apply) is unchanged from ApplyPilot. These additions run alongside
+> it and upstream where they help.
+
 ## Two Paths
 
 ### Full Pipeline (recommended)
@@ -223,6 +245,16 @@ jobpilot watch --no-prep              # Alert only, skip resume/cover-letter pre
 jobpilot notify-test                  # Send a test desktop notification
 jobpilot status                       # Pipeline statistics
 jobpilot dashboard                    # Open HTML results dashboard
+
+# --- New in JobPilot: discipline layer (learned from ai-job-search) ---
+jobpilot gate <posting-text>          # Pre-score hard gates: eligibility + language
+jobpilot score-dims --text <post>     # Explainable 5-dimension fit score (0-100 each)
+jobpilot outcome <url> --status interview   # Record an application outcome
+jobpilot outcome --list               # Outcome summary (applied/interview/offer/rejected...)
+jobpilot outcome --recalibrate        # Learn from real outcomes to refine scoring
+jobpilot outcome --promote url=signal # Promote a drafted app -> applied on ack email
+jobpilot interview --company X --posting TXT  # Build interview prep pack (STAR bridge)
+jobpilot upskill --text <post>        # Skill-gap analysis + learning plan
 ```
 
 ### Auto-apply: current reality

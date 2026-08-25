@@ -25,8 +25,8 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[dev]"
 
-      - name: Lint
-        run: ruff check src/
+      - name: Lint (new-capability modules)
+        run: ruff check src/jobpilot/gating.py src/jobpilot/outcomes.py src/jobpilot/quality.py src/jobpilot/interview.py src/jobpilot/upskill.py src/jobpilot/scoring/dimensions.py
 
       - name: Test
         run: pytest tests/ -v

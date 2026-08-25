@@ -14,11 +14,11 @@ genuine gaps stay visible in ``warnings`` / ``gaps`` and are never stuffed.
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 # ── Dimension constants ────────────────────────────────────────────────────
 
-DIMENSIONS: Tuple[str, ...] = (
+DIMENSIONS: tuple[str, ...] = (
     "technical_skills",
     "experience_match",
     "behavioral_culture",
@@ -26,8 +26,8 @@ DIMENSIONS: Tuple[str, ...] = (
     "determination_prefs",
 )
 
-# Weights sum to 1.0 exactly.
-DIMENSION_WEIGHTS: Dict[str, float] = {
+# Weights exactly sum to 1.0.
+DIMENSION_WEIGHTS: dict[str, float] = {
     "technical_skills": 0.30,
     "experience_match": 0.25,
     "behavioral_culture": 0.15,
@@ -35,60 +35,53 @@ DIMENSION_WEIGHTS: Dict[str, float] = {
     "determination_prefs": 0.15,
 }
 
-# Per-dimension rubric bands: (name, lo, hi, meaning); score is in band when
-# ``lo <= score < hi`` so the bands tile 0-100 without overlap.
-_RUBRIC_BANDS: Tuple[Tuple[str, int, int, str], ...] = (
-    ("excellent", 80, 100, "direct, hands-on fit with little or no ramp-up"),
+# Rubric bands (name, lo, hi, meaning); in-band when lo <= score < hi (tiles 0-100).
+_BAND_BASE: tuple[tuple[str, int, int, str], ...] = (
+    ("excellent", 80, 100, "direct, hands-on fit, little or no ramp-up"),
     ("strong", 60, 80, "clear fit; small gaps easily bridged"),
-    ("moderate", 40, 60, "partial fit; notable gaps, relevant background present"),
-    ("weak", 20, 40, "limited fit; significant gaps or mismatched direction"),
-    ("poor", 0, 20, "poor fit; largely mismatched requirements or experience"),
+    ("moderate", 40, 60, "partial fit; notable gaps, relevant background"),
+    ("weak", 20, 40, "limited fit; significant gaps or mismatch"),
+    ("poor", 0, 20, "poor fit; largely mismatched requirements"),
 )
 
-_DIM_MEANING: Dict[str, str] = {
+_DIM_MEANING: dict[str, str] = {
     "technical_skills": (
-        "how well the profile's declared skills cover the job's core "
-        "requirements (languages, frameworks, databases, tools, devops)"
+        "how well the profile's declared skills (languages, frameworks, "
+        "databases, devops, tools) cover the job's core requirements"
     ),
     "experience_match": (
-        "how well the nature/function of the work matches the profile (not "
-        "literal titles); years signalled vs years owned"
+        "how well the nature/function of the work matches the profile "
+        "(not literal titles); years signalled vs years owned"
     ),
     "behavioral_culture": (
-        "soft-skill and team-fit signals the job asks for that the profile "
+        "soft-skill and team-fit factors the job asks for and the profile "
         "genuinely supports or explicitly declines"
     ),
     "career_alignment": (
-        "target role, seniority, career goals, and location/time fit"
+        "target role, seniority, career goals, location and time fit"
     ),
     "determination_prefs": (
-        "how many of the profile's stated preferences/deal-breakers the job "
-        "satisfies"
+        "how well the job satisfies the candidate's stated preferences "
+        "and deal-breakers"
     ),
 }
 
 
-def _band_for(score: int) -> str:
-    for name, lo, hi, _m in _RUBRIC_BANDS:
-        if lo <= score < hi:
-            return name
-    return "poor"
-
-
-def rubric(dimension: str) -> Dict[str, Tuple[int, int, str]]:
+def rubric(dimension: str) -> dict[str, tuple[int, int, str]]:
     """Return the 0-100 rubric for a dimension as {band: (lo, hi, meaning)}."""
-    dim = dimension if dimension in DIMENSIONS else dimension.lower()
-    # validate against DIMENSIONS (or accept any string for leniency)
-    base = _DIM_MEANING.get(dim, "dimension fit rubric")
-    out: Dict[str, Tuple[int, int, str]] = {}
-    for band, lo, hi, meaning in _RUBRIC_BANDS:
-        out[band] = (lo, hi, f"{meaning}. [{base}]")
+    base = _DIM_MEANING.get(dimension, _DIM_MEANING["technical_skills"])
+    out: dict[str, tuple[int, int, str]] = {}
+    for name, lo, hi, meaning in _BAND_BASE:
+        out[name] = (lo, hi, f"{meaning}. {base}")
     return out
 
 
 def rubric_band(dimension: str, score: int) -> str:
-    """Short human label for a score on a dimension (e.g. 'strong')."""
-    return _band_for(score)
+    """Human label for a dimension score, e.g. 'strong' or 'poor'."""
+    for name, lo, hi, _m in _BAND_BASE:
+        if lo <= score < hi:
+            return name
+    return "poor"
 
 
 def _clamp(v: float) -> int:
@@ -98,33 +91,33 @@ def _clamp(v: float) -> int:
 # ── Text / matching helpers ────────────────────────────────────────────────
 
 
-def _words(text: str) -> List[str]:
+def _words(text: str) -> list[str]:
     return re.findall(r"[a-z0-9][a-z0-9 ./+_#-]*", (text or "").lower())
 
 
-def _matches(candidate: List[str], corpus: List[str]) -> List[str]:
+def _matches(candidate: list[str], corpus: list[str]) -> list[str]:
     """Candidate terms that appear as a phrase in the corpus (boundary match)."""
-    corp = " ".join(corpus)
-    hits: List[str] = []
+    joined = " ".join(corpus)
+    hits: list[str] = []
     for term in candidate:
         t = term.strip().lower()
         if not t:
             continue
-        if re.search(r"(^|[\s,./_(])" + re.escape(t) + r"($|[\s,./_)])", corp):
+        if re.search(r"(^|[\s,./_(])" + re.escape(t) + r"($|[\s,./_)])", joined):
             hits.append(term)
     return hits
 
 
-def _flat_profile_skills(profile: dict) -> Dict[str, List[str]]:
-    """skills_boundary -> {category: [terms]} (only non-empty)."""
+def _flat_profile_skills(profile: dict) -> dict[str, list[str]]:
+    """skills_boundary -> {category: [normalized terms]} (non-empty only)."""
     sb = (profile or {}).get("skills_boundary", {}) or {}
     cats = ("languages", "frameworks", "devops", "databases", "tools")
-    matrix: Dict[str, List[str]] = {}
+    matrix: dict[str, list[str]] = {}
     for c in cats:
         raw = sb.get(c, []) or []
         if isinstance(raw, str):
             raw = [raw]
-        items: List[str] = []
+        items: list[str] = []
         for it in raw:
             for w in re.findall(r"[a-z0-9][a-z0-9 ./+_-]*", str(it).lower()):
                 w = w.strip().rstrip(".")
@@ -135,8 +128,8 @@ def _flat_profile_skills(profile: dict) -> Dict[str, List[str]]:
     return matrix
 
 
-def _years_required(job_text: str, description: str) -> Optional[int]:
-    """Best-guess years-of-experience requirement, or None if not stated."""
+def _years_required(job_text: str, description: str) -> int | None:
+    """Best-effort years-of-experience requirement, or None if not stated."""
     for hay in (description, job_text):
         for m in re.finditer(r"(\d{1,2})\s*\+?\s*years?\b", hay.lower()):
             v = int(m.group(1))
@@ -145,90 +138,88 @@ def _years_required(job_text: str, description: str) -> Optional[int]:
     return None
 
 
-def _profile_years(profile: Dict) -> int:
+def _profile_years(profile: dict) -> int:
     v = (profile or {}).get("experience", {}).get("years_of_experience_total", 0)
     try:
         return int(float(str(v)))
     except (TypeError, ValueError):
         return 0
 
-# ── Dimension scorers ───────────────────────────────────────────────────────
 
-
-def _job_pieces(job: dict) -> Tuple[List[str], str]:
-    """Flatten a job dict into a token corpus + the full description string."""
+def _job_pieces(job: dict) -> tuple[list[str], str]:
+    """Flatten a job dict into a token corpus + full description text."""
     title = str(job.get("title") or "")
     location = str(job.get("location") or "")
     site = str(job.get("site") or "")
     desc = str(job.get("description") or "")
     full = str(job.get("full_description") or "")
-    job_text = " ".join([title, site, location, desc, full])
-    return _words(job_text.lower()), full or desc
+    job_text = " ".join([title, site, location, desc, full]).lower()
+    return _words(job_text), full or desc
 
 
-def _score_technical(job_tokens: List[str], profile: dict) -> Tuple[int, List[str]]:
-    """Core requirements covered by declared skills. Base 45, +matched terms."""
-    matrix = _flat_profile_skills(profile)
-    declared: List[str] = []
-    for _cat, items in matrix.items():
+def _raw_job_text(job: dict) -> str:
+    """Raw (un-tokenized) job text preserving currency/punctuation for rules."""
+    parts = [str(job.get(k) or "") for k in ("title", "site", "location",
+                                             "description", "full_description")]
+    return " ".join(parts)
+
+
+# ── Dimension scorers ───────────────────────────────────────────────────────
+
+
+def _score_technical(job_tokens: list[str], profile: dict) -> tuple[int, list[str]]:
+    """Base 45; each declared skill the job requires adds credit (cap +50)."""
+    declared: list[str] = []
+    for _cat, items in _flat_profile_skills(profile).items():
         declared.extend(items)
     hits = _matches(declared, job_tokens)
-    # Cap credit so no single dimension can overweight a keyword dump.
-    bonus = min(len(hits) * 4, 50)
-    score = _clamp(45 + bonus)
+    score = _clamp(45 + min(len(hits) * 4, 50))
     return score, hits
 
 
-def _score_experience(job_tokens: List[str], desc: str, profile: dict,
-                      warnings: List[str]) -> Tuple[int, List[str]]:
-    """Function/nature of work fit. Base 55 + role-family signal +/- years."""
+def _score_experience(job_tokens: list[str], desc: str, profile: dict,
+                      warnings: list[str]) -> int:
+    """Base 55 + role-family signal; a years shortfall is a clear penalty."""
     exp = (profile or {}).get("experience", {}) or {}
     current = str(exp.get("current_job_title") or "").lower()
     p_years = _profile_years(profile)
     family = ["engineer", "developer", "software", "data", "devops", "ops",
-              "designer", "product", "manager", "analyst", "scientist",
-              "frontend", "backend", "fullstack", "qa", "ml", "ai"]
-    role_tokens = _words(current)
-    # signal: does the nature of the job overlap the profile's function words?
+              "designer", "product", "manager", "analyst", "scientist"]
     signal = 0
     for t in job_tokens:
-        for kw in family:
-            if kw in t:
-                signal += 1
-                break
-    if role_tokens:
-        signal += len(_matches(role_tokens, job_tokens)) * 2
-    req_years = _years_required(" ".join(job_tokens), desc)
+        if any(kw in t for kw in family):
+            signal += 1
+    if current:
+        signal += len(_matches(_words(current), job_tokens)) * 2
     years_gap = 0
-    if req_years is not None and p_years < req_years:
-        years_gap = req_years - p_years
+    req = _years_required(" ".join(job_tokens), desc)
+    if req is not None and p_years < req:
+        years_gap = req - p_years
         warnings.append(
-            f"honesty gap: job signals ~{req_years}+ years of experience but the "
+            f"honesty gap: job signals ~{req}+ years of experience, but the "
             f"profile declares {p_years}."
         )
-    score = _clamp(55 + min(signal, 25) - years_gap * 5)
-    return score, []  # rationale assembled by caller using warnings
+    return _clamp(55 + min(signal, 25) - years_gap * 5)
 
 
-def _score_behavioral(job_tokens: List[str], profile: dict,
-                      gaps: List[str]) -> Tuple[int, List[str]]:
-    """Soft / team-fit signals. Base 50 + (~)factors the profile genuinely has."""
+def _score_behavioral(job_tokens: list[str], profile: dict,
+                      gaps: list[str]) -> int:
+    """Base 50; declared behavioral factors add credit, ask-for signals tracked."""
     factors = (profile or {}).get("behavioral_factors", []) or []
     if isinstance(factors, str):
         factors = [factors]
-    owned = _words(" ".join(factors))
-    hit = _matches(owned, job_tokens)
-    base = 50
-    score = _clamp(base + min(len(factors) * 8, 30))
-    gap_signal = [t for t in ["collaborative", "ownership", "fast-paced",
-                              "communication", "leadership", "mentorship",
-                              "autonomous", "agile"] if t in job_tokens]
-    return score, gap_signal
+    owned = _words(" ".join([str(f) for f in factors]) if factors else "")
+    score = _clamp(50 + min(len(factors) * 6, 30))
+    for want in ["collaboration", "communication", "ownership", "fast-paced",
+                 "leadership", "autonomous"]:
+        if want in job_tokens and not any(w in owned for w in _words(want)):
+            gaps.append(f"honesty gap: job soft-skill '{want}' not explicit in profile.")
+    return score
 
 
-def _score_career(job_tokens: List[str], job_raw: dict, profile: dict,
-                  warnings: List[str]) -> Tuple[int, List[str]]:
-    """Target role, seniority, career goals, location/time fit. Base 60."""
+def _score_career(job_tokens: list[str], job: dict, profile: dict,
+                  warnings: list[str]) -> int:
+    """Base 60; target-role hit, location/time alignment, stay honest."""
     exp = (profile or {}).get("experience", {}) or {}
     target = _words(str(exp.get("target_role") or ""))
     personal = (profile or {}).get("personal", {}) or {}
@@ -236,49 +227,54 @@ def _score_career(job_tokens: List[str], job_raw: dict, profile: dict,
     score = 60
     if target and _matches(target, job_tokens):
         score += 25
-    loc = str(job_raw.get("location") or "").lower()
-    if city and city and loc and city in loc:
+    loc = str(job.get("location") or "").lower()
+    blob = " ".join(job_tokens)
+    if city and loc and city in loc:
         score += 10
-    elif city and loc and re.search(r"(remote|hybrid)", " ".join(job_tokens).lower()):
+    elif city and re.search(r"remote|hybrid", blob):
         score += 5
-    elif city and loc and loc.strip():
-        warnings.append(
-            f"honesty gap: job location '{loc.strip()}' does not match profile "
-            f"city '{city}'"
-        )
-    return _clamp(score), warnings
+    elif city and loc.strip():
+        warnings.append(f"honesty gap: job location '{loc.strip()}' != profile city '{city}'.")
+    return _clamp(score)
 
 
-def _score_prefs(job_tokens: List[str], profile: dict, gaps: List[str]
-                 ) -> Tuple[int, List[str]]:
-    """How many stated preferences the job satisfies. Base 60, pref-aware."""
+def _score_prefs(job_tokens: list[str], profile: dict, gaps: list[str]) -> int:
+    """How many stated preferences the job satisfies (proportional, honest)."""
     prefs = (profile or {}).get("preferences", []) or []
     if isinstance(prefs, str):
         prefs = [prefs]
     if not prefs:
-        return 60, gaps
+        return 60
     satisfied = 0
     for p in prefs:
-        for t in _words(p):
-            if t in job_tokens:
-                satisfied += 1
-                break
-    score = _clamp(round(100 * satisfied / len(prefs)))
-    miss = [p for p in prefs if not any(t in job_tokens for t in _words(p))]
-    for p in miss:
-        gaps.append(f"honesty gap: preference '{p}' is not met by this job.")
-    return score, gaps
-
+        # match individual keyword words (not grouped phrases) against the job
+        p_tokens = [w for w in p.lower().split() if w]
+        hit = any(any(w in tok for tok in job_tokens) for w in p_tokens)
+        if hit:
+            satisfied += 1
+        else:
+            gaps.append(f"honesty gap: preference '{p}' is not met by this job.")
+    return _clamp(round(100 * satisfied / len(prefs)))
 # ── Deal-breakers ───────────────────────────────────────────────────────────
 
+# Default hard deal-breaker ids (each has a check in _default_deal_breakers).
+DEFAULT_DEAL_BREAKER_IDS: tuple[str, ...] = (
+    "eligibility",
+    "work_authorization",
+    "salary_floor",
+    "language",
+    "on_call",
+    "travel",
+)
 
-def dealbreaker_hit(job_text: str, rule: Dict[str, Any], profile: Dict[str, Any]) -> bool:
-    """Return True when the job text triggers the hard deal-breaker ``rule``.
 
-    A rule is a mapping with at least ``id`` and a ``check`` callable of
-    signature ``(job_text: str, profile: dict) -> bool`` (a one-arg check is
-    also tolerated).  ``describe`` is a human explanation.  The built-in set
-    is overridable via ``profile["hdeal_breakers"]``.
+def dealbreaker_hit(job_text: str, rule: dict[str, Any], profile: dict) -> bool:
+    """True when the job text triggers the hard deal-breaker ``rule``.
+
+    A rule is a mapping with an ``id`` and a ``check`` callable of signature
+    ``(job_text, profile)`` (a one-argument check is tolerated too) plus an
+    optional human ``describe``.  Honest because it never guesses profile
+    facts -- it compares real declared profile fields to the job text.
     """
     check = rule.get("check")
     if not callable(check):
@@ -289,35 +285,22 @@ def dealbreaker_hit(job_text: str, rule: Dict[str, Any], profile: Dict[str, Any]
         return bool(check(job_text))
 
 
-# ── Default hard deal-breakers ─────────────────────────────────────────────
-
-HARD_DEAL_BREAKERS: Tuple[str, ...] = (
-    "eligibility",
-    "work_authorization",
-    "salary_floor",
-    "language",
-    "on_call",
-    "travel",
-)
-
-
-def _default_dealrules(profile: dict) -> Dict[str, Dict[str, Any]]:
-    wa = (profile or {}).get("work_authorization", {}) or {}
+def _default_deal_breakers(profile: dict) -> dict[str, dict[str, Any]]:
     comp = (profile or {}).get("compensation", {}) or {}
 
+    def _eligibility(job: str, prof: dict) -> bool:
+        return bool(re.search(
+            r"(must be a (us|u\.s\.|canadian|uk|european) citizen|security clearance|top.?secret)",
+            job, re.IGNORECASE))
+
     def _authorized(job: str, prof: dict) -> bool:
-        ra = str(wa.get("legally_authorized_to_work", "")).lower().startswith("yes")
+        wa = (prof or {}).get("work_authorization", {}) or {}
+        ok = str(wa.get("legally_authorized_to_work", "")).lower().startswith("yes")
         need = str(wa.get("require_sponsorship", "")).lower().startswith("yes")
-        if (not ra or need) and re.search(
-            r"(must be .*authorized|authorization to work|can[^ ]* work|sponsorship)", job
-        ):
+        if (not ok or need) and re.search(
+                r"(authorization to work|authorized|sponsorship)", job, re.IGNORECASE):
             return True
         return False
-
-    def _citizenship(job: str, prof: dict) -> bool:
-        return bool(re.search(
-            r"(must be a (us|u\.s\.|canadian|uk|european|eU) citizen|"
-            r"security clearance|top.?secret clearance)", job, re.I))
 
     def _salary_floor(job: str, prof: dict) -> bool:
         try:
@@ -326,104 +309,194 @@ def _default_dealrules(profile: dict) -> Dict[str, Dict[str, Any]]:
             floor = 0.0
         if floor <= 0:
             return False
-        # "$90,000" or "$90000"
-        m = re.search(r"\$(\d{2,3}(?:,\d{3})+)\b", job)
+        m = re.search(r"\$?(\d{2,3}(?:,\d{3})+)\b", job)
         if m:
-            if float(m.group(1).replace(",", "")) < floor:
-                return True
-            return False
-        # "90k" or "$90k"
-        m = re.search(r"(?:\$)?(\d{1,2})\s*k\b", job.lower())
-        if m and float(m.group(1)) * 1000 < floor:
-            return True
+            return float(m.group(1).replace(",", "")) < floor
+        # "120k", "120k-140k", "$120k" -> require digits right before "k"
+        m = re.search(r"(?:\$)?(\d{1,3})\s*k\b", job.lower())
+        if m:
+            return float(m.group(1)) * 1000 < floor
         return False
 
     def _language(job: str, prof: dict) -> bool:
         sb = (prof or {}).get("skills_boundary", {}) or {}
         langs = {x.lower() for x in (sb.get("languages") or []) if isinstance(x, str)}
-        for m in re.finditer(r"(fluent in|proficient in|native)\s+([a-zA-Z]+)\b", job, re.I):
-            need = m.group(2).lower()
-            if need not in langs:
+        for m in re.finditer(r"(fluent in|fluent|proficient in|native)\s+([a-z]{2,})\b",
+                             job, re.IGNORECASE):
+            if m.group(2).lower() not in langs:
                 return True
         return False
 
     def _on_call(job: str, prof: dict) -> bool:
-        return bool(re.search(r"\bon[- ]?call\b", job, re.I))
+        return bool(re.search(r"\bon[- ]?call\b", job, re.IGNORECASE))
 
     def _travel(job: str, prof: dict) -> bool:
         return bool(re.search(
-            r"(travel (up to )?(\d{2,3}\s*%|50%|100%)|frequent travel|on the road)", job, re.I))
+            r"(travel (up to |required )?(\d{2,3}\s*%|50%|100%)|frequent travel|on the road)",
+            job, re.IGNORECASE))
 
     def _remote_only(job: str, prof: dict) -> bool:
-        if re.search(r"(remote only|100% remote|fully remote)", job, re.I):
-            return bool(re.search(r"onsite|hybrid", job, re.I))
+        if re.search(r"(remote only|100% remote|fully remote)", job, re.IGNORECASE):
+            return bool(re.search(r"onsite|hybrid", job, re.IGNORECASE))
         return False
 
     return {
-        "eligibility": {"id": "eligibility", "check": _citizenship,
+        "eligibility": {"id": "eligibility", "check": _eligibility,
                         "describe": "requires citizenship/clearance the profile lacks"},
         "work_authorization": {"id": "work_authorization", "check": _authorized,
-                               "describe": "requires legal authorization/sponsorship the profile cannot provide"},
+                               "describe": "requires sponsorship/authorization the profile cannot provide"},
         "salary_floor": {"id": "salary_floor", "check": _salary_floor,
-                         "describe": "posted salary is below the profile's compensation floor"},
+                         "describe": "posted salary is below the profile compensation floor"},
         "language": {"id": "language", "check": _language,
-                     "describe": "requires a language not present in the profile"},
+                     "describe": "requires a language not declared in the profile"},
         "on_call": {"id": "on_call", "check": _on_call,
                     "describe": "requires on-call duties the profile treats as a hard veto"},
         "travel": {"id": "travel", "check": _travel,
                    "describe": "requires heavy or frequent travel"},
         "remote_only": {"id": "remote_only", "check": _remote_only,
-                        "describe": "remote-only role conflicts with the profile's onsite/hybrid stance"},
+                        "describe": "remote-only role conflicts with an onsite/hybrid stance"},
     }
 
 
-def deal_candidates(job_text: str, job: dict, profile: dict
-                    ) -> Tuple[List[Dict[str, Any]], List[str]]:
-    """Return ``(hits, active_ids)`` — every triggered deal-breaker as a dict
-    with ``id``/``describe`` (so callers get an honest audit trail).
+def deal_breakers(job_text: str, profile: dict) -> tuple[list[str], list[str]]:
+    """Return ``(hit_ids, hit_descriptions)`` for all active deal-breakers.
 
-    ``profile["hdeal_breakers"] = [...]`` replaces the default set entirely;
-    ``profile["preferences"] = [...]`` may also name built-ins like "on_call".
+    Active rules come from :data:`DEFAULT_DEAL_BREAKER_IDS` unless the profile
+    overrides them with ``profile["hdeal_breakers"] = ["...", "..."]``, which
+    replaces the default set. ``profile["preferences"]`` may also reference a
+    built-in id (e.g. "no on-call") to force it on.
     """
     table = _default_deal_breakers(profile)
-    overrides = (profile or {}).get("hdeal_breakers", None)
+    overrides = (profile or {}).get("hdeal_breakers")
     prefs = (profile or {}).get("preferences", []) or []
     if isinstance(prefs, str):
         prefs = [prefs]
-
-    # Merge built-in ids the profile's preferences explicitly reference.
-    extra_ids = [str(x) for x in prefs if str(x).lower().replace(" ", "_") in table]
+    forced = [str(p).lower().replace(" ", "_").replace("no_", "") for p in prefs]
+    forced = [f for f in forced if f in table]
 
     if overrides is not None:
-        if isinstance(overrides, str):
-            overrides = [overrides]
-        active: List[Dict[str, Any]] = []
-        for o in overrides:
-            key = str(o).strip()
-            base = key.lower().replace(" ", "_")
-            if base in table:
-                rule = dict(table[base])
-            else:
-                rule = {"id": base, "describe": f"profile override: {key}",
-                        "check": lambda j, p, k=key.lower(): k in j.lower()}
-            active.append(rule)
+        raw = overrides if isinstance(overrides, list) else [overrides]
+        ids: list[str] = []
+        for o in raw:
+            k = str(o).strip()
+            lookup = k.lower().replace(" ", "_")
+            ids.append(lookup)
     else:
-        active = []
-        ids = list(HARD_DEAL_BREAKERS)
-        for pid in extra_ids(ids, prefs):
-            if pid in table:
-                active.append(dict(table[pid]))
+        ids = list(DEFAULT_DEAL_BREAKER_IDS)
+        for f in forced:
+            if f not in ids:
+                ids.append(f)
 
-    hits: List[Dict[str, Any]] = []
-    for r in active:
-        if dealbreaker_hit(job_text, r, profile):
-            hits.append({k: v for k, v in r.items() if k != "check"})
-    active_ids = [r["id"] for r in active if "id" in r]
-    return hits, active_ids
+    hit_ids: list[str] = []
+    descs: list[str] = []
+    for key in ids:
+        rule = table.get(key)
+        if rule is None:
+            continue
+        if dealbreaker_hit(job_text, rule, profile):
+            hit_ids.append(key)
+            descs.append(rule.get("describe", key))
+    return hit_ids, descs
 
 
-def _default_break(profile: dict) -> Dict[str, Dict[str, Any]]:
-    """Deprecated alias kept for compatibility; maps to the canonical table."""
-    return _default_deal_breakers(profile)
+# ── Top-level entry point ──────────────────────────────────────────────────
 
-T
+def score_dimensions(job: dict, profile: dict) -> dict:
+    """Dimensioned, explainable fit evaluation of ``job`` for ``profile``.
+
+    Args:
+        job: mapping with optional ``title, location, description,
+            full_description, site``.
+        profile: mapping using the JobPilot profile shape (skills_boundary,
+            experience{...}, compensation{...}, work_authorization{...}, plus
+            optional ``preferences`` and ``hdeal_breakers``).
+
+    Returns:
+        {
+          "dimensions": {dim: {"score": int, "rationale": str, "rubric": str}},
+          "overall": int,          # weighted mean of the 5 dims (0 when vetoed)
+          "composite": int,        # = overall (the number a pipeline may persist)
+          "dealbreakers": list,    # non-empty description list when vetoed
+          "deal_breakers": list,   # alias of dealbreakers (for clarity)
+          "warnings": list,        # honest fit notes / soft gaps
+          "gaps": list,            # explicit honesty gaps (never stuffed)
+          "computed": bool,        # False -> do-not-score sentinel (deal-breaker veto)
+        }
+
+    Deal-breakers are a VETO: any hit forces ``overall == composite == 0``,
+    ``computed == False`` and a non-empty ``dealbreakers`` / ``deal_breakers``.
+    """
+    warnings: list[str] = []
+    gaps: list[str] = []
+    job_tokens, desc = _job_pieces(job)
+    job_text = _raw_job_text(job)
+
+    tech, tech_hits = _score_technical(job_tokens, profile)
+    exp = _score_experience(job_tokens, desc, profile, warnings)
+    beh = _score_behavioral(job_tokens, profile, gaps)
+    car = _score_career(job_tokens, job, profile, warnings)
+    pre = _score_prefs(job_tokens, profile, gaps)
+
+    dims = {
+        "technical_skills": tech,
+        "experience_match": exp,
+        "behavioral_culture": beh,
+        "career_alignment": car,
+        "determination_prefs": pre,
+    }
+
+    hit_ids, hit_desc = deal_breakers(job_text, profile)
+    vetoed = bool(hit_ids)
+
+    # Rationales: honest, concrete, per dimension.
+    def _rationale(name: str, score: int) -> str:
+        band = rubric_band(name, score)
+        if name == "technical_skills":
+            extra = (
+                f"Declared skills matched by the job: {', '.join(tech_hits) or 'none'}."
+                if tech_hits else "No declared skill matched the job's core requirements."
+            )
+            return f"{band} ({score}/100). {extra}"
+        if name == "experience_match":
+            return f"{band} ({score}/100). Assessed by nature of work + years signal."
+        if name == "behavioral_culture":
+            return f"{band} ({score}/100). Soft-skill/team-fit factors considered."
+        if name == "career_alignment":
+            target = (profile or {}).get("experience", {}).get("target_role", "")
+            return f"{band} ({score}/100). Target role '{target}' and location/time fit."
+        return f"{band} ({score}/100). Proportion of stated preferences satisfied."
+
+    dimensions_out: dict[str, dict[str, Any]] = {}
+    for name, score in dims.items():
+        dimensions_out[name] = {
+            "score": score,
+            "rationale": _rationale(name, score),
+            "rubric": rubric_band(name, score),
+        }
+
+    # Veto
+    if vetoed:
+        overall = 0
+        composite = 0
+        warnings.append("VETOED: a hard deal-breaker applies (see dealbreakers).")
+    else:
+        overall = int(round(
+            DIMENSION_WEIGHTS["technical_skills"] * tech
+            + DIMENSION_WEIGHTS["experience_match"] * exp
+            + DIMENSION_WEIGHTS["behavioral_culture"] * beh
+            + DIMENSION_WEIGHTS["career_alignment"] * car
+            + DIMENSION_WEIGHTS["determination_prefs"] * pre
+        ))
+        composite = overall
+
+    return {
+        "dimensions": dimensions_out,
+        "overall": overall,
+        "composite": composite,
+        "dealbreakers": hit_desc,
+        "deal_breakers": hit_desc,
+        "warnings": warnings,
+        "gaps": gaps,
+        "computed": not vetoed,
+    }
+

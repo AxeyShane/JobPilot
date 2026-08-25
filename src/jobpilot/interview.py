@@ -8,10 +8,10 @@ primary STAR story, and a honest gap list -- it never invents experience.
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 # Vocab used to recognize skills mentioned in a posting's text.
-SKILL_TERMS: List[str] = [
+SKILL_TERMS: list[str] = [
     "python", "java", "javascript", "typescript", "golang", "ruby", "c++", "c#",
     "sql", "postgresql", "mysql", "mongo", "mongodb", "graphql", "rest", "api",
     "react", "redux", "vue", "angular", "node", "nodejs", "django", "flask", "fastapi",
@@ -24,7 +24,7 @@ SKILL_TERMS: List[str] = [
 
 # Generic behavioral questions worth prepping regardless of the STAR mapping
 # (sanity fallback so a pack is never empty).
-GENERIC_QUESTIONS: List[Dict[str, str]] = [
+GENERIC_QUESTIONS: list[dict[str, str]] = [
     {"q": "Tell me about yourself and your background.",
      "intent": "Screen for narrative, fit, and pacing.",
      "bridge": "Give a compressed arc: who you are, what you have shipped, what you want next."},
@@ -47,7 +47,7 @@ def _norm(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip().lower()
 
 
-def profile_skills(profile: Dict[str, Any]) -> List[str]:
+def profile_skills(profile: dict[str, Any]) -> list[str]:
     """Flatten the profile's claimed skills into a sorted, de-duplicated list.
 
     Reads ``skills_boundary.{languages,frameworks,devops,databases,tools}`` plus
@@ -66,10 +66,10 @@ def profile_skills(profile: Dict[str, Any]) -> List[str]:
     return sorted(seen)
 
 
-def present_keywords(text: str) -> List[str]:
+def present_keywords(text: str) -> list[str]:
     """Return posting/role keywords (in SKILL_TERMS) found in ``text``."""
     hay = _norm(text)
-    found: List[str] = []
+    found: list[str] = []
     for term in SKILL_TERMS:
         if re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", hay):
             if term not in found:
@@ -77,7 +77,7 @@ def present_keywords(text: str) -> List[str]:
     return found
 
 
-def extract_star_stories(profile: Dict[str, Any], limit: int = 6) -> List[Dict[str, str]]:
+def extract_star_stories(profile: dict[str, Any], limit: int = 6) -> list[dict[str, str]]:
     """Build honest STAR stories from real resume facts only.
 
     Situation/task come from preserved companies/projects, action lists the
@@ -109,30 +109,34 @@ def extract_star_stories(profile: Dict[str, Any], limit: int = 6) -> List[Dict[s
     return stories
 
 
-def map_questions_to_star(posting_text: str, profile: Dict[str, Any]) -> List[Dict[str, Any]]:
+def map_questions_to_star(posting_text: str, profile: dict[str, Any]) -> list[dict[str, Any]]:
     """Map likely interview questions from posting keywords onto STAR stories.
 
     Always honest: a question whose keyword has no STAR example is returned with
     ``matched=False`` and an honest bridge (never invented experience).
     """
     skills = profile_skills(profile)
+    present = set(skills)
     stories = extract_star_stories(profile)
 
-    # Distribute verified STAR stories across matched keyword topics.
-    by_token = {}
+    # Distribute verified STAR stories across matched topic keywords.
+    by_token: dict[str, list[dict[str, str]]] = {}
     for story in stories:
         for tok in present_keywords(" ".join(story.values())):
             by_token.setdefault(tok, []).append(story)
 
-    questions: List[Dict[str, Any]] = []
+    questions: list[dict[str, Any]] = []
     for keyword in present_keywords(posting_text):
-        matched_stories = by_token.get(keyword, [])
-        matched = bool(matched_stories)
+        # Honest claim: a keyword is "matched" only if the profile really lists it.
+        matched = keyword in present
         if matched:
-            star = matched_stories[0]
+            star = (by_token.get(keyword) or stories[:1] or [None])[0]
             q = f"Walk me through a time you applied {keyword} to a real problem."
             intent = f"Probe hands-on {keyword} experience."
-            bridge = f"Tell the {keyword} story (see STAR map): {star['situation']} {star['action']}"
+            if star:
+                bridge = f"Tell the {keyword} story (see STAR map): {star['situation']} {star['action']}"
+            else:
+                bridge = f"No written STAR story yet for {keyword}; answer from real experience, do not invent one."
         else:
             star = None
             missing_note = "not in your profile" if keyword not in skills else "not yet covered by a written story"
@@ -149,7 +153,7 @@ def map_questions_to_star(posting_text: str, profile: Dict[str, Any]) -> List[Di
     return questions
 
 
-def company_briefing(company: str, external_facts: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def company_briefing(company: str, external_facts: dict[str, Any] | None) -> dict[str, Any]:
     """Build a company briefing with a verify-before-use contract.
 
     Only sentence-level claims come from ``external_facts``; sets ``used_or_not``
@@ -179,10 +183,10 @@ def company_briefing(company: str, external_facts: Optional[Dict[str, Any]]) -> 
 
 
 def build_prep_pack(
-    application_archive: Dict[str, Any],
-    profile: Dict[str, Any],
-    external_facts: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    application_archive: dict[str, Any],
+    profile: dict[str, Any],
+    external_facts: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Produce a full interview prep pack.
 
     Uses archive's posting_text + profile to map questions to STAR, builds
@@ -203,7 +207,7 @@ def build_prep_pack(
             })
 
     stories = extract_star_stories(profile)
-    star_map: Dict[str, str] = {}
+    star_map: dict[str, str] = {}
     if stories:
         best = stories[0]
         star_map = {
@@ -249,7 +253,7 @@ def build_prep_pack(
     }
 
 
-def mock_interview(question: str, star_map: Dict[str, Any], depth: int = 1) -> str:
+def mock_interview(question: str, star_map: dict[str, Any], depth: int = 1) -> str:
     """Return a scripted no-LLM mock interviewer script for one question."""
     depth = max(1, int(depth or 1))
     placeholders = {k: star_map.get(k, "(not supplied)") for k in ("situation", "task", "action", "result")}

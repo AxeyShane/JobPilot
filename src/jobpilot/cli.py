@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -35,7 +34,7 @@ VALID_STAGES = ("discover", "enrich", "score", "tailor", "cover", "pdf")
 
 def _bootstrap() -> None:
     """Common setup: load env, create dirs, init DB."""
-    from jobpilot.config import load_env, ensure_dirs
+    from jobpilot.config import ensure_dirs, load_env
     from jobpilot.database import init_db
 
     load_env()
@@ -75,7 +74,7 @@ def init() -> None:
 
 @app.command()
 def run(
-    stages: Optional[list[str]] = typer.Argument(
+    stages: list[str] | None = typer.Argument(
         None,
         help=(
             "Pipeline stages to run. "
@@ -229,7 +228,7 @@ def notify_test(
 
 @app.command()
 def apply(
-    limit: Optional[int] = typer.Option(None, "--limit", "-l", help="Max applications to submit."),
+    limit: int | None = typer.Option(None, "--limit", "-l", help="Max applications to submit."),
     workers: int = typer.Option(1, "--workers", "-w", help="Number of parallel browser workers."),
     min_score: int = typer.Option(6, "--min-score", help="Minimum fit score for job selection."),
     model: str = typer.Option("haiku", "--model", "-m", help="Claude model name (engine=claude only)."),
@@ -245,11 +244,11 @@ def apply(
     continuous: bool = typer.Option(False, "--continuous", "-c", help="Run forever, polling for new jobs."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview actions without submitting."),
     headless: bool = typer.Option(False, "--headless", help="Run browsers in headless mode."),
-    url: Optional[str] = typer.Option(None, "--url", help="Apply to a specific job URL."),
+    url: str | None = typer.Option(None, "--url", help="Apply to a specific job URL."),
     gen: bool = typer.Option(False, "--gen", help="Generate prompt file for manual debugging instead of running."),
-    mark_applied: Optional[str] = typer.Option(None, "--mark-applied", help="Manually mark a job URL as applied."),
-    mark_failed: Optional[str] = typer.Option(None, "--mark-failed", help="Manually mark a job URL as failed (provide URL)."),
-    fail_reason: Optional[str] = typer.Option(None, "--fail-reason", help="Reason for --mark-failed."),
+    mark_applied: str | None = typer.Option(None, "--mark-applied", help="Manually mark a job URL as applied."),
+    mark_failed: str | None = typer.Option(None, "--mark-failed", help="Manually mark a job URL as failed (provide URL)."),
+    fail_reason: str | None = typer.Option(None, "--fail-reason", help="Reason for --mark-failed."),
     reset_failed: bool = typer.Option(False, "--reset-failed", help="Reset all failed jobs for retry."),
     poll_interval: int = typer.Option(60, "--poll-interval", help="Seconds between DB polls when queue is empty (lower = faster continuous mode)."),
     fast: bool = typer.Option(False, "--fast", "-f", help="Speed mode: sets workers=4, poll-interval=5, headless, engine=local. Combine with --continuous for max throughput."),
@@ -266,7 +265,8 @@ def apply(
         console.print(f"[green][fast] Fast mode:[/green] workers={workers}, poll={poll_interval}s, headless, engine={engine}")
     _bootstrap()
 
-    from jobpilot.config import check_tier, PROFILE_PATH as _profile_path
+    from jobpilot.config import PROFILE_PATH as _profile_path
+    from jobpilot.config import check_tier
     from jobpilot.database import get_connection
 
     # --- Utility modes (no Chrome/Claude needed) ---
@@ -298,6 +298,7 @@ def apply(
     # Check 1: browser + agent brain available
     if engine == "local":
         import os
+
         from jobpilot.config import get_chrome_path
 
         missing = []
@@ -340,7 +341,7 @@ def apply(
             raise typer.Exit(code=1)
 
     if gen:
-        from jobpilot.apply.launcher import gen_prompt, BASE_CDP_PORT
+        from jobpilot.apply.launcher import gen_prompt
         target = url or ""
         if not target:
             console.print("[red]--gen requires --url to specify which job.[/red]")
@@ -351,7 +352,7 @@ def apply(
             raise typer.Exit(code=1)
         mcp_path = _profile_path.parent / ".mcp-apply-0.json"
         console.print(f"[green]Wrote prompt to:[/green] {prompt_file}")
-        console.print(f"\n[bold]Run manually:[/bold]")
+        console.print("\n[bold]Run manually:[/bold]")
         console.print(
             f"  claude --model {model} -p "
             f"--mcp-config {mcp_path} "
@@ -483,9 +484,14 @@ def web(
 def doctor() -> None:
     """Check your setup and diagnose missing requirements."""
     import shutil
+
     from jobpilot.config import (
-        load_env, PROFILE_PATH, RESUME_PATH, RESUME_PDF_PATH,
-        SEARCH_CONFIG_PATH, ENV_PATH, get_chrome_path,
+        PROFILE_PATH,
+        RESUME_PATH,
+        RESUME_PDF_PATH,
+        SEARCH_CONFIG_PATH,
+        get_chrome_path,
+        load_env,
     )
 
     load_env()
@@ -588,7 +594,7 @@ def doctor() -> None:
     console.print()
 
     # Tier summary
-    from jobpilot.config import get_tier, TIER_LABELS
+    from jobpilot.config import TIER_LABELS, get_tier
     tier = get_tier()
     console.print(f"[bold]Current tier: Tier {tier} -- {TIER_LABELS[tier]}[/bold]")
 
@@ -599,6 +605,215 @@ def doctor() -> None:
         console.print("[dim]  -> Tier 3 unlocks: auto-apply (needs Claude Code CLI + Chrome + Node.js)[/dim]")
 
     console.print()
+
+
+
+# ---------------------------------------------------------------------------
+# New capability commands (outcomes feedback loop, gates, dimensional score,
+# interview prep, upskill) - added in the JobPilot fork.
+# ---------------------------------------------------------------------------
+
+@app.command("outcome")
+def outcome_cmd(
+    url: str | None = typer.Argument(None, help="Job URL to record an outcome for."),
+    status: str | None = typer.Option(None, "--status", "-s", help="Outcome status: applied, waiting, interview, offer, accepted, rejected, no response, offer declined, closed."),
+    note: str | None = typer.Option(None, "--note", "-n", help="Free-text note / reason."),
+    source: str = typer.Option("manual", "--source", help="Where the signal came from (manual, gmail, notion)."),
+    list_all: bool = typer.Option(False, "--list", "-l", help="Show the outcomes summary (counts)."),
+    recal: bool = typer.Option(False, "--recalibrate", "-r", help="Show score->outcome recalibration lessons."),
+    promote: str | None = typer.Option(None, "--promote", help="[url=signal] promote a drafted app to applied on an ack signal."),
+) -> None:
+    """Record and review application outcomes; recalibrate scoring from real results."""
+    from jobpilot.database import get_connection
+    from jobpilot.outcomes import (
+        get_outcome,
+        init_outcomes,
+        outcomes_summary,
+        promote_draft,
+        recalibrate,
+        record_outcome,
+    )
+    _bootstrap()
+    conn = get_connection()
+    init_outcomes(conn)
+
+    if promote:
+        if "=" in promote:
+            u, sig = promote.split("=", 1)
+        else:
+            u, sig = promote, "acknowledgement"
+        ok = promote_draft(conn, u, sig)
+        console.print(f"[{'green' if ok else 'yellow'}]promote_draft: {u} -> {'applied' if ok else 'no draft to promote'}[/]")
+        return
+
+    if list_all:
+        summary = outcomes_summary(conn)
+        table = Table(title="Outcome Summary")
+        table.add_column("Outcome")
+        table.add_column("Count")
+        for k, v in summary.items():
+            table.add_row(k, str(v))
+        console.print(table)
+        return
+
+    if recal:
+        for lesson in recalibrate(conn):
+            console.print(f"[bold]{lesson.get('band','')}[/bold] {lesson.get('lesson','')}")
+        return
+
+    if url:
+        from jobpilot.database import get_connection as _gc  # noqa: F401
+        if status:
+            record_outcome(conn, url, status=status, source=source, notes=note,
+                           status_date=None)
+            console.print(f"[green]Recorded outcome {status!r} for {url}[/]")
+        else:
+            o = get_outcome(conn, url)
+            if o:
+                console.print(o)
+            else:
+                console.print(f"[yellow]No outcome recorded for {url}[/]")
+        return
+
+    console.print("[dim]Provide --url/--status, or use --list / --recalibrate.[/dim]")
+
+
+@app.command("gate")
+def gate_cmd(
+    text: str = typer.Argument(..., help="Job posting text to gate before scoring."),
+    check: str = typer.Option("all", "--check", "-c", help="eligibility | language | all"),
+) -> None:
+    """Run pre-score hard gates (eligibility + language) on a posting."""
+    from jobpilot.config import load_profile
+    from jobpilot.gating import evaluate_eligibility, evaluate_language
+
+    try:
+        profile = load_profile()
+    except Exception:
+        console.print("[red]No profile found. Run 'jobpilot init' first.[/]")
+        raise typer.Exit(1)
+
+    work_auth = profile.get("work_authorization", {})
+    langs = profile.get("skills_boundary", {}).get("languages", [])
+
+    if check in ("all", "eligibility"):
+        v = evaluate_eligibility(text, work_auth)
+        color = "green" if v["verdict"] in ("PASS", "PROCEED") else ("yellow" if v["verdict"]=="UNVERIFIED" else "red")
+        console.print(f"[bold]{color}]Eligibility: {v['verdict']}[/] {v.get('reason','')}")
+        if v.get("quoted"):
+            console.print(f"  [dim]quoted: {v['quoted']}[/dim]")
+
+    if check in ("all", "language"):
+        v = evaluate_language(text, langs)
+        color = "green" if v["verdict"]=="PASS" else ("yellow" if v["verdict"]=="FLAG" else "red")
+        console.print(f"[bold]{color}]Language: {v['verdict']}[/] {v.get('reason','')}")
+        for d in v.get("language_details", []):
+            console.print(f"  [dim]{d}[/dim]")
+
+
+@app.command("score-dims")
+def score_dims_cmd(
+    url: str | None = typer.Option(None, "--url", help="Job URL (reads full_description/short from DB)."),
+    text: str | None = typer.Option(None, "--text", help="Raw job text directly."),
+) -> None:
+    """Explainable, dimensioned fit scoring (5 dims, 0-100)."""
+    from jobpilot.config import load_profile
+    from jobpilot.scoring.dimensions import score_dimensions
+
+    if not text and not url:
+        console.print("Provide --url or --text.")
+        raise typer.Exit(1)
+    if not text:
+        from jobpilot.database import get_connection
+        conn = get_connection()
+        row = conn.execute("SELECT full_description, title, location, description FROM jobs WHERE url=?",
+                           (url,)).fetchone()
+        if not row:
+            console.print(f"[red]No job found for {url}[/]")
+            raise typer.Exit(1)
+        text = row[0] or row[3] or ""
+        job = {"title": row[1], "location": row[2], "full_description": text, "description": text}
+    else:
+        job = {"full_description": text, "description": text}
+
+    try:
+        profile = load_profile()
+    except Exception:
+        console.print("[red]No profile found. Run 'jobpilot init' first.[/]")
+        raise typer.Exit(1)
+
+    res = score_dimensions(job, profile)
+    if not res.get("computed", True):
+        console.print("[red]Deal-breakers veto this posting:[/]")
+        for db in res.get("deal_breakers") or res.get("dealbreakers") or []:
+            console.print(f"  - [red]{db}[/]")
+        return
+    table = Table(title=f"Dimensioned Fit Score (overall {res.get('overall','-')}/100)")
+    table.add_column("Dimension")
+    table.add_column("Score")
+    table.add_column("Rationale")
+    for dim, info in res.get("dimensions", {}).items():
+        table.add_row(dim, str(info.get("score")), info.get("rationale", "")[:120])
+    console.print(table)
+    for w in res.get("warnings", []):
+        console.print(f"[yellow]warn: {w}[/]")
+    for g in res.get("gaps", []):
+        console.print(f"[dim]gap: {g}[/dim]")
+
+
+@app.command("interview")
+def interview_cmd(
+    company: str = typer.Option(..., "--company", help="Company name."),
+    posting_text: str | None = typer.Option(None, "--posting", help="Posting text."),
+) -> None:
+    """Build an interview prep pack (questions, STAR bridge, company brief)."""
+    from jobpilot.config import load_profile
+    from jobpilot.interview import build_prep_pack, company_briefing
+
+    try:
+        profile = load_profile()
+    except Exception:
+        console.print("[red]No profile found. Run 'jobpilot init' first.[/]")
+        raise typer.Exit(1)
+
+    archive = {"company": company, "job_title": profile.get("experience", {}).get("target_role", ""),
+               "posting_text": posting_text or "", "submitted_cv": "", "submitted_cover": "",
+               "feedback": [], "round_idx": 1}
+    pack = build_prep_pack(archive, profile)
+    brief = company_briefing(company, external_facts=None)
+    console.print(f"[bold]{company} prep pack[/]")
+    console.print(f"  Brief used/verify: {brief.get('used', 'no external facts')}")
+    for q in pack.get("likely_questions", []):
+        console.print(f"  Q: {q.get('q','')}")
+        console.print(f"     [dim]{q.get('bridge','')}[/dim]")
+    for g in pack.get("gaps", []):
+        console.print(f"[yellow]  gap: {g.get('topic','')} -> {g.get('honest_bridge','')}[/]")
+
+
+@app.command("upskill")
+def upskill_cmd(
+    text: str | None = typer.Option(None, "--text", help="One posting text."),
+) -> None:
+    """Analyze skill gaps vs a posting and produce a learning plan."""
+    from jobpilot.config import load_profile
+    from jobpilot.upskill import gap_analysis, learning_plan
+
+    try:
+        profile = load_profile()
+    except Exception:
+        console.print("[red]No profile found. Run 'jobpilot init' first.[/]")
+        raise typer.Exit(1)
+
+    postings = [] if not text else [{"title": "target", "full_description": text, "description": text}]
+    gaps = gap_analysis(profile, postings)
+    plan = learning_plan(gaps.get("gaps", []))
+    console.print("[bold]Skill gap heatmap[/]")
+    for g in gaps.get("heatmap", []):
+        console.print(f"  [yellow]{g}[/]")
+    console.print("[bold]Learning plan[/]")
+    for step in plan:
+        console.print(f"  - {step}")
+
 
 
 if __name__ == "__main__":

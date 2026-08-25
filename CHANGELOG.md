@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - 2026-08-25 (JobPilot fork)
+- **Fork of ApplyPilot** into JobPilot: renamed package/CLI/data-home
+  (`applypilot` → `jobpilot`, `~/.applypilot` → `~/.jobpilot`), re-licensed to
+  **AGPL-3.0** (matching the parent project), PyPI distribution `job-pilot-ai`.
+- **CI runs on push/PR** (was manual-trigger only) and actually runs the test
+  suite (previously referenced a `tests/` dir that did not exist).
+- **`jobpilot gate <text>`** — pre-score hard gates: **eligibility gate**
+  (citizenship/PR/security-clearance read verbatim; hard stop, reported, never
+  silently dropped) and **language gate** (undeclared required language = FAIL;
+  a bar above your declared level = FLAG for your judgment).
+- **`jobpilot score-dims`** — explainable, dimensioned fit scoring (5 dims,
+  each 0-100 with rubric + rationale), deal-breakers veto outright, honest gaps
+  stay visible (never stuffed). New module `jobpilot/scoring/dimensions.py`.
+- **`jobpilot outcome`** — closed feedback loop: record real application
+  outcomes, promote `drafted`→`applied` on an acknowledgement, `--recalibrate`
+  feeds what actually got replies back into scoring. Single-source-of-truth
+  outcome vocabulary. New module `jobpilot/outcomes.py`.
+- **Document-quality + security** (`jobpilot/quality.py`): ATS text-layer check
+  (catches the en-dash date bug), honest keyword-gap reporting, second-pass
+  reviewer critique, and untrusted-input sanitization (postings are data, never
+  instructions — strips injected instructions, URLs, base64/hex blobs).
+- **`jobpilot interview`** — interview prep pack (company brief, likely
+  questions, STAR bridge; honest gaps, never invented experience).
+- **`jobpilot upskill`** — skill-gap analysis vs postings + a learning plan.
+- **74 unit tests** across the new modules (gating, outcomes, quality,
+  dimensions, interview, upskill) — all pass.
+
+
 ### Added - 2026-08-23 (later)
 - **`jobpilot health`** - loop liveness (pid cross-checked against real log activity,
   so a stale pid file never reads as healthy), per-stage totals and 24h counts, acquirable

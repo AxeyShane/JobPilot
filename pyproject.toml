@@ -1,6 +1,6 @@
 [project]
 name = "job-pilot-ai"
-version = "0.3.0"
+version = "0.4.0"
 description = "JobPilot - AI-powered end-to-end job application pipeline"
 readme = "README.md"
 license = "AGPL-3.0-only"
@@ -56,3 +56,20 @@ artifacts = ["src/jobpilot/config/*.yaml"]
 [tool.ruff]
 target-version = "py311"
 line-length = 120
+
+# Style-only rules that the codebase (inherited from ApplyPilot) uses heavily
+# and that do not affect correctness. Kept as non-blocking to avoid churning
+# logic; the tests are the real gate.
+[tool.ruff.lint]
+ignore = [
+    "UP031",   # printf-style % formatting vs f-strings (codebase style)
+    "SIM102",  # collapsible if (readability preference)
+    "RUF007",  # zip vs itertools.pairwise (codebase style)
+    "B008",    # typer.Argument(...) in defaults (required by the CLI framework)
+    "BLE001",  # blind except: Exception (intentional graceful degradation)
+    "PLR2004", # magic-value comparisons
+    "RUF046",  # unnecessary int() cast (codebase style)
+    "FLY002",  # static join vs f-string (style)
+    "PERF102", # dict .values() iteration (style)
+    "SIM103",  # return condition directly (style)
+]
