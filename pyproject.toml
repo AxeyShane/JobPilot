@@ -39,9 +39,9 @@ dev = ["pytest>=7.0", "ruff>=0.1"]
 jobpilot = "jobpilot.cli:app"
 
 [project.urls]
-Homepage = "https://github.com/Pickle-Pixel/JobPilot"
-Repository = "https://github.com/Pickle-Pixel/JobPilot"
-Issues = "https://github.com/Pickle-Pixel/JobPilot/issues"
+Homepage = "https://github.com/AxeyShane/JobPilot"
+Repository = "https://github.com/AxeyShane/JobPilot"
+Issues = "https://github.com/AxeyShane/JobPilot/issues"
 
 [build-system]
 requires = ["hatchling"]
