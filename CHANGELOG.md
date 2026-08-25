@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - 2026-08-25 (post-fork polish)
+- **First-class OpenRouter support** — `OPENROUTER_API_KEY` is now the
+  primary provider (default model `google/gemini-2.5-flash-lite`), wired
+  through `llm.py` provider detection, per-stage routing fallback,
+  `jobpilot init` wizard (default choice), `jobpilot doctor`, and
+  `.env.example`. One key powers score/tailor/cover/apply; Gemini, OpenAI,
+  and local llama.cpp/Ollama remain supported.
+- **README rewritten** — removed inherited ApplyPilot marketing claims
+  (e.g. "applied to 1,000 jobs in 2 days"), repositioned around JobPilot's
+  actual differentiators: hard gates, explainable scoring, the outcome loop,
+  ATS-safe documents, hostile-posting defense, interview/upskill tools.
+
+
 ### Added - 2026-08-25 (JobPilot fork)
 - **Fork of ApplyPilot** into JobPilot: renamed package/CLI/data-home
   (`applypilot` → `jobpilot`, `~/.applypilot` → `~/.jobpilot`), re-licensed to

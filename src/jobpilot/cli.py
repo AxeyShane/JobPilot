@@ -533,10 +533,14 @@ def doctor() -> None:
 
     # --- Tier 2 checks ---
     import os
+    has_openrouter = bool(os.environ.get("OPENROUTER_API_KEY"))
     has_gemini = bool(os.environ.get("GEMINI_API_KEY"))
     has_openai = bool(os.environ.get("OPENAI_API_KEY"))
     has_local = bool(os.environ.get("LLM_URL"))
-    if has_gemini:
+    if has_openrouter:
+        model = os.environ.get("LLM_MODEL", "google/gemini-2.5-flash-lite")
+        results.append(("LLM API key", ok_mark, f"OpenRouter ({model})"))
+    elif has_gemini:
         model = os.environ.get("LLM_MODEL", "gemini-2.0-flash")
         results.append(("LLM API key", ok_mark, f"Gemini ({model})"))
     elif has_openai:

@@ -248,13 +248,18 @@ def _setup_ai_features() -> None:
     console.print("Supported providers: [bold]Gemini[/bold] (recommended, free tier), OpenAI, local (Ollama/llama.cpp)")
     provider = Prompt.ask(
         "Provider",
-        choices=["gemini", "openai", "local"],
-        default="gemini",
+        choices=["openrouter", "gemini", "openai", "local"],
+        default="openrouter",
     )
 
     env_lines = ["# JobPilot configuration", ""]
 
-    if provider == "gemini":
+    if provider == "openrouter":
+        api_key = Prompt.ask("OpenRouter API key (from openrouter.ai/keys)")
+        model = Prompt.ask("Model", default="google/gemini-2.5-flash-lite")
+        env_lines.append(f"OPENROUTER_API_KEY={api_key}")
+        env_lines.append(f"LLM_MODEL={model}")
+    elif provider == "gemini":
         api_key = Prompt.ask("Gemini API key (from aistudio.google.com)")
         model = Prompt.ask("Model", default="gemini-2.0-flash")
         env_lines.append(f"GEMINI_API_KEY={api_key}")

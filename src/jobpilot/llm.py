@@ -2,11 +2,14 @@
 Unified LLM client for JobPilot.
 
 Auto-detects provider from environment:
-  GEMINI_API_KEY  -> Google Gemini (default: gemini-2.0-flash)
-  OPENAI_API_KEY  -> OpenAI (default: gpt-4o-mini)
-  LLM_URL         -> Local llama.cpp / Ollama compatible endpoint
+  OPENROUTER_API_KEY -> OpenRouter gateway (default: google/gemini-2.5-flash-lite)
+  GEMINI_API_KEY     -> Google Gemini (default: gemini-2.0-flash)
+  OPENAI_API_KEY     -> OpenAI (default: gpt-4o-mini)
+  LLM_URL            -> Local llama.cpp / Ollama compatible endpoint
 
-LLM_MODEL env var overrides the model name for any provider.
+LLM_MODEL env var overrides the model name for any provider. Per-stage
+routing (SCORE_LLM_*/TAILOR_LLM_*/...) lets each pipeline stage point at its
+own gateway/model -- see README.
 """
 
 import logging
@@ -27,10 +30,18 @@ def _detect_provider() -> tuple[str, str, str]:
     Reads env at call time (not module import time) so that load_env() called
     in _bootstrap() is always visible here.
     """
+    openrouter_key = os.environ.get("OPENROUTER_API_KEY", "")
     gemini_key = os.environ.get("GEMINI_API_KEY", "")
     openai_key = os.environ.get("OPENAI_API_KEY", "")
     local_url = os.environ.get("LLM_URL", "")
     model_override = os.environ.get("LLM_MODEL", "")
+
+    if openrouter_key and not local_url:
+        return (
+            "https://openrouter.ai/api/v1",
+            model_override or "google/gemini-2.5-flash-lite",
+            openrouter_key,
+        )
 
     if gemini_key and not local_url:
         return (
@@ -55,7 +66,7 @@ def _detect_provider() -> tuple[str, str, str]:
 
     raise RuntimeError(
         "No LLM provider configured. "
-        "Set GEMINI_API_KEY, OPENAI_API_KEY, or LLM_URL in your environment."
+        "Set OPENROUTER_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY, or LLM_URL in your environment."
     )
 
 
@@ -328,7 +339,7 @@ def get_client() -> LLMClient:
     global _instance
     if _instance is None:
         base_url, model, api_key = _detect_provider()
-        is_cloud = base_url.startswith(("https://generativelanguage.googleapis.com", "https://api.openai.com"))
+        is_cloud = base_url.startswith(("https://generativelanguage.googleapis.com", "https://api.openai.com", "https://openrouter.ai"))
         timeout = _TIMEOUT if is_cloud else _LOCAL_TIMEOUT
         log.info("LLM provider: %s  model: %s  timeout: %ds", base_url, model, timeout)
         _instance = LLMClient(base_url, model, api_key, timeout=timeout)
@@ -366,6 +377,7 @@ def get_score_client() -> LLMClient:
     """
     global _score_instance
     if _score_instance is None:
+        openrouter_key = os.environ.get("OPENROUTER_API_KEY", "")
         gemini_key = os.environ.get("GEMINI_API_KEY", "")
         openai_key = os.environ.get("OPENAI_API_KEY", "")
         model_override = os.environ.get("SCORE_LLM_MODEL", "")
@@ -376,6 +388,8 @@ def get_score_client() -> LLMClient:
             model = model_override or "local-model"
             api_key = (os.environ.get("SCORE_LLM_API_KEY", "")
                        or os.environ.get("TAILOR_LLM_API_KEY", ""))
+        elif openrouter_key:
+            base_url, model, api_key = ("https://openrouter.ai/api/v1", model_override or "google/gemini-2.5-flash-lite", openrouter_key)
         elif gemini_key:
             base_url, model, api_key = (_GEMINI_COMPAT_BASE, model_override or "gemini-2.0-flash", gemini_key)
         elif openai_key:
