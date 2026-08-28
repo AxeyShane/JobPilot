@@ -463,16 +463,44 @@ def create_app() -> Flask:
 
     # -- settings: LLM provider --
 
+    def _resolve_openrouter() -> str:
+        """Detect OpenRouter routing: simple OPENROUTER_API_KEY form, OR the
+        per-stage OpenRouter setup JobPilot actually ships with (stage URLs
+        pointing at openrouter.ai + a gateway key in TAILOR_LLM_API_KEY)."""
+        if os.environ.get("OPENROUTER_API_KEY"):
+            return "openrouter"
+        for k in ("SCORE_LLM_URL", "TAILOR_LLM_URL", "COVER_LLM_URL", "APPLY_LLM_URL", "ENRICH_LLM_URL"):
+            if "openrouter.ai" in (os.environ.get(k, "") or ""):
+                if os.environ.get("TAILOR_LLM_API_KEY") or os.environ.get("SCORE_LLM_API_KEY") or os.environ.get("APPLY_LLM_API_KEY"):
+                    return "openrouter"
+        return ""
+
     @app.get("/api/settings/llm")
     def get_llm_settings():
-        return jsonify({
-            "provider": "local" if os.environ.get("LLM_URL") else (
-                "gemini" if os.environ.get("GEMINI_API_KEY") else (
-                    "openai" if os.environ.get("OPENAI_API_KEY") else "none"
+        or_route = _resolve_openrouter()
+        # Prefer OpenRouter when it's configured for any stage: score/tailor/
+        # cover/apply all route through it here, even if LLM_URL (the default
+        # stage) also points at a local endpoint.
+        provider = ("openrouter" if or_route else (
+            "gemini" if os.environ.get("GEMINI_API_KEY") else (
+                "openai" if os.environ.get("OPENAI_API_KEY") else (
+                    "local" if os.environ.get("LLM_URL") else "none"
                 )
-            ),
+            )
+        ))
+        eff_model = (os.environ.get("SCORE_LLM_MODEL")
+                     or os.environ.get("TAILOR_LLM_MODEL")
+                     or os.environ.get("COVER_LLM_MODEL")
+                     or os.environ.get("LLM_MODEL") or "")
+        return jsonify({
+            "provider": provider,
             "gemini_key_set": bool(os.environ.get("GEMINI_API_KEY")),
             "openai_key_set": bool(os.environ.get("OPENAI_API_KEY")),
+            "openrouter": or_route,
+            "openrouter_key_set": bool(os.environ.get("OPENROUTER_API_KEY")
+                                      or os.environ.get("TAILOR_LLM_API_KEY")
+                                      or os.environ.get("SCORE_LLM_API_KEY")),
+            "openrouter_model": eff_model,
             "llm_url": os.environ.get("LLM_URL", ""),
             "llm_model": os.environ.get("LLM_MODEL", ""),
             "llm_api_key_set": bool(os.environ.get("LLM_API_KEY")),
@@ -483,7 +511,13 @@ def create_app() -> Flask:
         data = request.get_json(force=True)
         provider = data.get("provider")
         updates: dict[str, str | None] = {}
-        if provider == "local":
+        if provider == "openrouter":
+            updates["SCORE_LLM_URL"] = "https://openrouter.ai/api/v1"
+            updates["TAILOR_LLM_URL"] = "https://openrouter.ai/api/v1"
+            updates["COVER_LLM_URL"] = "https://openrouter.ai/api/v1"
+            if data.get("openrouter_key"):
+                updates["TAILOR_LLM_API_KEY"] = data["openrouter_key"]
+        elif provider == "local":
             updates["LLM_URL"] = data.get("llm_url") or "http://127.0.0.1:8080/v1"
             updates["LLM_MODEL"] = data.get("llm_model") or "local-model"
             if data.get("llm_api_key"):
@@ -2134,6 +2168,7 @@ PAGE_HTML = r"""<!DOCTYPE html>
         <div class="form-group">
           <label>AI Provider</label>
           <select id="llm-provider" onchange="updateLlmRows()">
+            <option value="openrouter">OpenRouter (Cloud — one key, any model)</option>
             <option value="gemini">Google Gemini (Cloud)</option>
             <option value="openai">OpenAI (Cloud)</option>
             <option value="local">Local AI (Ollama / llama.cpp)</option>
@@ -2142,6 +2177,11 @@ PAGE_HTML = r"""<!DOCTYPE html>
         <div class="form-group" id="row-gemini-key">
           <label>Google Gemini API Key</label>
           <input type="password" id="gemini-key" placeholder="(Keep blank to leave unchanged)">
+        </div>
+        <div class="form-group" id="row-openrouter-key" style="display:none;">
+          <label>OpenRouter API Key</label>
+          <input type="password" id="openrouter-key" placeholder="sk-or-v1-... (keep blank to leave unchanged)">
+          <p class="card-sub">Best choice — one key works with all models.</p>
         </div>
         <div class="form-group" id="row-openai-key" style="display:none;">
           <label>OpenAI API Key</label>
@@ -2875,11 +2915,14 @@ async function loadSettings() {
   // LLM Settings
   try {
     const llm = await (await fetch('/api/settings/llm')).json();
-    $('llm-provider').value = llm.provider === 'none' ? 'gemini' : llm.provider;
+    let prov = llm.provider === 'none' ? 'gemini' : llm.provider;
+    if (prov === 'none' && llm.openrouter) prov = 'openrouter';
+    $('llm-provider').value = prov;
     $('llm-url').value = llm.llm_url || '';
     $('llm-model').value = llm.llm_model || '';
     updateLlmRows();
-    $('llm-current').textContent = `Current AI: ${llm.provider} ${llm.llm_model ? '(' + llm.llm_model + ')' : ''}`;
+    const shown = prov === 'openrouter' ? (llm.openrouter_model || 'OpenRouter') : llm.llm_model;
+    $('llm-current').textContent = `Current AI: ${prov === 'openrouter' ? 'OpenRouter' : prov} ${shown ? '(' + shown + ')' : ''}`;
   } catch (e) {
     console.error('loadSettings LLM error:', e);
   }
@@ -2918,6 +2961,7 @@ async function loadSettings() {
 
 function updateLlmRows() {
   const p = $('llm-provider').value;
+  $('row-openrouter-key').style.display = p === 'openrouter' ? 'flex' : 'none';
   $('row-gemini-key').style.display = p === 'gemini' ? 'flex' : 'none';
   $('row-openai-key').style.display = p === 'openai' ? 'flex' : 'none';
   $('row-local-url').style.display = p === 'local' ? 'flex' : 'none';
@@ -2932,6 +2976,7 @@ async function saveLlm() {
     llm_api_key: $('llm-api-key').value,
     gemini_key: $('gemini-key').value,
     openai_key: $('openai-key').value,
+    openrouter_key: $('openrouter-key').value,
   };
   await fetch('/api/settings/llm', {
     method: 'POST',
@@ -2940,6 +2985,7 @@ async function saveLlm() {
   });
   $('gemini-key').value = '';
   $('openai-key').value = '';
+  $('openrouter-key').value = '';
   $('llm-api-key').value = '';
   showToast('✓ AI Assistant settings saved!');
   await loadSettings();
