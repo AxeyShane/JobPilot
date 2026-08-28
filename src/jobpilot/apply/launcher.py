@@ -148,6 +148,7 @@ def acquire_job(target_url: str | None = None, min_score: int = 6,
                 WHERE (url = ? OR application_url = ? OR application_url LIKE ? OR url LIKE ?)
                   AND tailored_resume_path IS NOT NULL
                   AND (apply_status IS NULL OR apply_status != 'in_progress')
+                  AND (scam_verdict = 'clear' OR strategy = 'workday_api')
                 LIMIT 1
             """, (target_url, target_url, like, like)).fetchone()
         else:
@@ -171,6 +172,7 @@ def acquire_job(target_url: str | None = None, min_score: int = 6,
                   AND (apply_status IS NULL OR apply_status = 'failed')
                   AND (apply_attempts IS NULL OR apply_attempts < ?)
                   AND fit_score >= ?
+                  AND (scam_verdict = 'clear' OR strategy = 'workday_api')
                   {site_clause}
                   {url_clauses}
                 -- Least-attempted first. Ordering by score alone meant a

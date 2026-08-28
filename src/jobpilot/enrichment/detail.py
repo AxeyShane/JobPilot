@@ -641,7 +641,10 @@ def scrape_site_batch(
             context = browser.new_context(user_agent=UA)
             page = context.new_page()
 
-            for i, (url, title) in enumerate(jobs):
+            for i, job_tuple in enumerate(jobs):
+                url = job_tuple[0]
+                title = job_tuple[1]
+                strat = job_tuple[2] if len(job_tuple) > 2 else None
                 log.info("[%d/%d] %s", i + 1, len(jobs), title[:50] if title else url[:50])
 
                 result = scrape_detail_page(page, url)
@@ -665,10 +668,32 @@ def scrape_site_batch(
                 if status in ("ok", "partial"):
                     stats[status] += 1
                     cleaned_desc = _sanitize_and_log(url, result.get("full_description"))
+
+                    scam_verdict = None
+                    scam_reasons = None
+                    scam_checked_at = None
+
+                    if cleaned_desc:
+                        if strat == "workday_api":
+                            scam_verdict = "clear"
+                            scam_reasons = "[]"
+                            scam_checked_at = now
+                        else:
+                            from jobpilot.scam_gate import evaluate_scam_posting
+                            verdict, reasons = evaluate_scam_posting(cleaned_desc)
+                            scam_verdict = verdict
+                            scam_reasons = json.dumps(reasons) if reasons is not None else None
+                            scam_checked_at = now
+                            if verdict == "blocked":
+                                log.warning("Scam gate BLOCKED %s: %s", url, reasons)
+
                     conn.execute(
                         "UPDATE jobs SET full_description = ?, application_url = ?, "
-                        "detail_scraped_at = ?, detail_error = NULL WHERE url = ?",
-                        (cleaned_desc, result.get("application_url"), now, url),
+                        "detail_scraped_at = ?, detail_error = NULL, "
+                        "scam_verdict = ?, scam_reasons = ?, scam_checked_at = ? "
+                        "WHERE url = ?",
+                        (cleaned_desc, result.get("application_url"), now,
+                         scam_verdict, scam_reasons, scam_checked_at, url),
                     )
                 else:
                     stats["error"] += 1
@@ -717,7 +742,7 @@ def _run_detail_scraper(
     # (agent_loop's watchdog, rate limits, a killed run), so whatever it does
     # get through should be the freshest postings rather than the oldest.
     rows = conn.execute(
-        f"SELECT url, title, site FROM jobs {where} ORDER BY site, discovered_at DESC",
+        f"SELECT url, title, site, strategy FROM jobs {where} ORDER BY site, discovered_at DESC",
         params,
     ).fetchall()
 
@@ -728,9 +753,10 @@ def _run_detail_scraper(
     site_jobs: dict[str, list[tuple]] = {}
     for row in rows:
         url, title, site = row[0], row[1], row[2]
+        strat = row[3] if len(row) > 3 else None
         if sites and site not in sites:
             continue
-        site_jobs.setdefault(site, []).append((url, title))
+        site_jobs.setdefault(site, []).append((url, title, strat))
 
     log.info("Pending: %d jobs across %d sites (workers=%d)", len(rows), len(site_jobs), workers)
     for site, jobs in site_jobs.items():
@@ -829,7 +855,7 @@ def stream_detail(
         while True:
             skip_filter = " AND ".join(f"site != '{s}'" for s in SKIP_DETAIL_SITES)
             rows = conn.execute(
-                "SELECT url, title, site FROM jobs "
+                "SELECT url, title, site, strategy FROM jobs "
                 f"WHERE detail_scraped_at IS NULL AND {skip_filter} "
                 "ORDER BY site LIMIT 200"
             ).fetchall()
@@ -838,7 +864,8 @@ def stream_detail(
                 site_jobs: dict[str, list[tuple]] = {}
                 for row in rows:
                     url, title, site = row[0], row[1], row[2]
-                    site_jobs.setdefault(site, []).append((url, title))
+                    strat = row[3] if len(row) > 3 else None
+                    site_jobs.setdefault(site, []).append((url, title, strat))
 
                 for site, jobs in site_jobs.items():
                     delay = SITE_DELAYS.get(site, 2.0)

@@ -129,7 +129,25 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
             last_attempted_at     TEXT,
             apply_duration_ms     INTEGER,
             apply_task_id         TEXT,
-            verification_confidence TEXT
+            verification_confidence TEXT,
+
+            -- Scam detection stage
+            scam_verdict          TEXT,
+            scam_reasons          TEXT,
+            scam_checked_at       TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS reported_signatures (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_url       TEXT,
+            company       TEXT,
+            domain        TEXT,
+            signature     TEXT,
+            source_text   TEXT,
+            note          TEXT,
+            reported_at   TEXT,
+            source        TEXT DEFAULT 'local'
         )
     """)
     conn.commit()
@@ -181,6 +199,10 @@ _ALL_COLUMNS: dict[str, str] = {
     "apply_duration_ms": "INTEGER",
     "apply_task_id": "TEXT",
     "verification_confidence": "TEXT",
+    # Scam detection
+    "scam_verdict": "TEXT",
+    "scam_reasons": "TEXT",
+    "scam_checked_at": "TEXT",
 }
 
 
@@ -202,6 +224,21 @@ def ensure_columns(conn: sqlite3.Connection | None = None) -> list[str]:
     if conn is None:
         conn = get_connection()
 
+    # Ensure reported_signatures table exists
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS reported_signatures (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_url       TEXT,
+            company       TEXT,
+            domain        TEXT,
+            signature     TEXT,
+            source_text   TEXT,
+            note          TEXT,
+            reported_at   TEXT,
+            source        TEXT DEFAULT 'local'
+        )
+    """)
+
     existing = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
     added = []
 
@@ -214,8 +251,7 @@ def ensure_columns(conn: sqlite3.Connection | None = None) -> list[str]:
             conn.execute(f"ALTER TABLE jobs ADD COLUMN {col} {dtype}")
             added.append(col)
 
-    if added:
-        conn.commit()
+    conn.commit()
 
     return added
 
