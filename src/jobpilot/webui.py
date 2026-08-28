@@ -760,561 +760,1707 @@ PAGE_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>JobPilot Control</title>
+<title>JobPilot - AI Job Search Assistant</title>
 <style>
-  /* "Paper Console" -- light, near-white, forest accent, high-contrast
-     graphic register. Flat by design: no glow/gradient chrome, solid fills,
-     hairline rules. Contrast-checked: --text-muted ~5.4:1, --text-faint
-     ~4.6:1 on --bg (both clear the 4.5:1 floor for body/placeholder text). */
   :root {
-    --bg: #ffffff; --bg-grad: none;
-    --surface: #f7f7f5; --surface-2: #eeeeea; --border: #d8d8d2;
-    --text: #111111; --text-muted: #6b6b66; --text-faint: #767570;
-    --accent: #1a6b4f; --accent-soft: #1a6b4f1a; --accent-strong: #145038;
-    --ok: #1a6b4f; --ok-bg: #e3f0ea; --warn: #a8720e; --warn-bg: #fbf0dc;
-    --danger: #b3402c; --danger-bg: #fbe4df;
-    --radius: 999px; --radius-lg: 12px; --radius-sm: 8px;
-    --shadow: none;
+    --bg: #f8fafc;
+    --card: #ffffff;
+    --border: #e2e8f0;
+    --border-subtle: #f1f5f9;
+    --text: #0f172a;
+    --text-muted: #64748b;
+    --text-faint: #94a3b8;
+    --primary: #2563eb;
+    --primary-hover: #1d4ed8;
+    --primary-light: #eff6ff;
+    --success: #16a34a;
+    --success-light: #f0fdf4;
+    --warning: #d97706;
+    --warning-light: #fffbeb;
+    --danger: #dc2626;
+    --danger-hover: #b91c1c;
+    --danger-light: #fef2f2;
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --radius-full: 9999px;
+    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-    background: var(--bg-grad), var(--bg); color: var(--text); min-height: 100vh;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    line-height: 1.5;
     -webkit-font-smoothing: antialiased;
   }
   header {
-    padding: 1.1rem 2rem; border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; justify-content: space-between;
-    position: sticky; top: 0; background: color-mix(in srgb, var(--bg) 88%, transparent);
-    backdrop-filter: blur(10px); z-index: 10;
+    background: #ffffff;
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: var(--shadow-sm);
   }
-  h1 { font-size: 1.15rem; font-weight: 700; letter-spacing: -0.01em; display: flex; align-items: center; gap: 0.5rem; }
-  svg.icon { width: 15px; height: 15px; flex-shrink: 0; fill: currentColor; stroke: none; vertical-align: -3px; }
-  nav button svg.icon, .panel h2 svg.icon { margin-right: 0.1rem; }
-  nav { display: flex; gap: 0.3rem; background: var(--surface); padding: 0.3rem; border-radius: 999px; border: 1px solid var(--border); }
+  .header-inner {
+    max-width: 1160px;
+    margin: 0 auto;
+    padding: 0.85rem 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    text-decoration: none;
+    color: var(--text);
+  }
+  .brand-logo {
+    width: 36px;
+    height: 36px;
+    background: var(--primary);
+    color: #ffffff;
+    border-radius: 9px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    font-size: 1.15rem;
+    box-shadow: 0 2px 6px rgba(37,99,235,0.3);
+  }
+  .brand-title {
+    font-size: 1.25rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: var(--text);
+  }
+  .brand-sub {
+    font-size: 0.76rem;
+    color: var(--text-muted);
+    font-weight: 500;
+  }
+  nav {
+    display: flex;
+    background: #f1f5f9;
+    padding: 0.25rem;
+    border-radius: var(--radius-full);
+    gap: 0.25rem;
+  }
   nav button {
-    background: transparent; border: none; color: var(--text-muted); padding: 0.45rem 1rem;
-    border-radius: 999px; cursor: pointer; font-size: 0.82rem; font-weight: 500;
-    transition: all 0.15s ease; white-space: nowrap;
-    display: inline-flex; align-items: center; gap: 0.4rem;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    padding: 0.55rem 1.25rem;
+    border-radius: var(--radius-full);
+    cursor: pointer;
+    font-size: 0.92rem;
+    font-weight: 600;
+    transition: all 0.15s ease;
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
   }
-  nav button:hover:not(.active) { color: var(--text); background: #ffffff0a; }
-  nav button.active { background: var(--accent); color: #fff; font-weight: 600; box-shadow: 0 2px 10px -2px var(--accent-soft); }
-  main { padding: 2rem; max-width: 1140px; margin: 0 auto; }
-  .tab { display: none; animation: fadeIn 0.25s ease; }
-  .tab.active { display: block; }
-  @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
-  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.9rem; margin-bottom: 1.75rem; }
+  nav button:hover:not(.active) {
+    color: var(--text);
+    background: rgba(255,255,255,0.7);
+  }
+  nav button.active {
+    background: #ffffff;
+    color: var(--primary);
+    box-shadow: var(--shadow-sm);
+  }
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.4rem 0.9rem;
+    border-radius: var(--radius-full);
+    font-size: 0.82rem;
+    font-weight: 600;
+    background: #f1f5f9;
+    color: var(--text-muted);
+  }
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-faint);
+  }
+  .status-badge.active {
+    background: var(--success-light);
+    color: var(--success);
+  }
+  .status-badge.active .status-dot {
+    background: var(--success);
+    animation: pulse 1.8s infinite;
+  }
+  .status-badge.stalled {
+    background: var(--warning-light);
+    color: var(--warning);
+  }
+  .status-badge.stalled .status-dot {
+    background: var(--warning);
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.85); }
+  }
+  .btn-emergency {
+    background: var(--danger);
+    color: #ffffff;
+    border: none;
+    padding: 0.5rem 1.05rem;
+    border-radius: var(--radius-md);
+    font-size: 0.84rem;
+    font-weight: 700;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    transition: background 0.15s ease, transform 0.1s ease;
+  }
+  .btn-emergency:hover {
+    background: var(--danger-hover);
+    transform: translateY(-1px);
+  }
+  .btn-emergency:active {
+    transform: translateY(0);
+  }
+
+  main {
+    max-width: 1160px;
+    margin: 0 auto;
+    padding: 1.75rem 1.5rem 3.5rem 1.5rem;
+  }
+  .tab-pane {
+    display: none;
+  }
+  .tab-pane.active {
+    display: block;
+    animation: fadeIn 0.2s ease;
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(3px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Cards & Components */
   .card {
-    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
-    padding: 1.15rem 1.25rem; transition: border-color 0.15s ease, transform 0.15s ease;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1.5rem;
+    box-shadow: var(--shadow-sm);
+    margin-bottom: 1.25rem;
   }
-  .card:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); transform: translateY(-1px); }
-  .card .num { font-size: 1.85rem; font-weight: 800; letter-spacing: -0.02em; line-height: 1; }
-  .card .label { color: var(--text-muted); font-size: 0.75rem; margin-top: 0.4rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.03em; }
-  .panel {
-    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
-    padding: 1.5rem; margin-bottom: 1.25rem; box-shadow: var(--shadow);
+  .card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+    gap: 0.5rem;
+    flex-wrap: wrap;
   }
-  .panel h2 { font-size: 0.95rem; margin-bottom: 1rem; color: var(--text); font-weight: 700; display: flex; align-items: center; gap: 0.5rem; }
-  .row { display: flex; gap: 0.75rem; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; }
-  label { font-size: 0.8rem; color: var(--text-muted); min-width: 90px; font-weight: 500; }
-  input[type=text], input[type=password], input[type=number], select, textarea {
-    background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 0.55rem 0.75rem;
-    border-radius: var(--radius-sm); font-size: 0.85rem; flex: 1; min-width: 200px; font-family: inherit;
+  .card-title {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .card-sub {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin-top: -0.5rem;
+    margin-bottom: 1rem;
+  }
+
+  /* Hero & Status Card */
+  .hero-card {
+    background: linear-gradient(135deg, #ffffff 0%, #eff6ff 100%);
+    border: 1px solid #bfdbfe;
+    border-radius: var(--radius-lg);
+    padding: 1.75rem;
+    margin-bottom: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    box-shadow: 0 4px 12px rgba(37,99,235,0.06);
+  }
+  .hero-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.25rem;
+    flex-wrap: wrap;
+  }
+  .hero-info h2 {
+    font-size: 1.45rem;
+    font-weight: 800;
+    color: var(--text);
+    letter-spacing: -0.02em;
+  }
+  .hero-info p {
+    font-size: 0.92rem;
+    color: var(--text-muted);
+    margin-top: 0.25rem;
+    max-width: 580px;
+  }
+  .hero-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    font-family: inherit;
+    font-size: 0.92rem;
+    font-weight: 600;
+    padding: 0.65rem 1.25rem;
+    border-radius: var(--radius-md);
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    text-decoration: none;
+    line-height: 1.2;
+  }
+  .btn:active { transform: translateY(1px); }
+  .btn-lg {
+    padding: 0.85rem 1.65rem;
+    font-size: 1.05rem;
+    font-weight: 700;
+    border-radius: var(--radius-md);
+  }
+  .btn-primary {
+    background: var(--primary);
+    color: #ffffff;
+  }
+  .btn-primary:hover {
+    background: var(--primary-hover);
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+  }
+  .btn-secondary {
+    background: #ffffff;
+    color: var(--text);
+    border-color: var(--border);
+  }
+  .btn-secondary:hover {
+    background: #f8fafc;
+    border-color: var(--text-faint);
+  }
+  .btn-success {
+    background: var(--success);
+    color: #ffffff;
+  }
+  .btn-success:hover {
+    background: #15803d;
+  }
+  .btn-danger-outline {
+    background: #ffffff;
+    color: var(--danger);
+    border-color: #fecaca;
+  }
+  .btn-danger-outline:hover {
+    background: var(--danger-light);
+    border-color: var(--danger);
+  }
+  .btn-sm {
+    padding: 0.35rem 0.75rem;
+    font-size: 0.82rem;
+    border-radius: var(--radius-sm);
+  }
+
+  /* Control Switches Grid */
+  .switches-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 0.9rem;
+  }
+  .switch-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.85rem 1.15rem;
+    background: #ffffff;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    gap: 1rem;
+  }
+  .switch-label-group {
+    display: flex;
+    flex-direction: column;
+  }
+  .switch-title {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .switch-desc {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-top: 0.15rem;
+  }
+  .toggle-btn {
+    background: #e2e8f0;
+    border: none;
+    color: var(--text-muted);
+    font-weight: 700;
+    padding: 0.45rem 1rem;
+    border-radius: var(--radius-full);
+    cursor: pointer;
+    font-size: 0.82rem;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+  }
+  .toggle-btn.on {
+    background: var(--success);
+    color: #ffffff;
+  }
+
+  /* Big Friendly Numbers Grid */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  .stat-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1.3rem 1.5rem;
+    box-shadow: var(--shadow-sm);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .stat-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+  }
+  .stat-card-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .stat-icon {
+    font-size: 1.6rem;
+    line-height: 1;
+  }
+  .stat-num {
+    font-size: 2.25rem;
+    font-weight: 800;
+    color: var(--text);
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+    margin-top: 0.35rem;
+  }
+  .stat-label {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--text);
+    margin-top: 0.25rem;
+  }
+  .stat-desc {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-top: 0.25rem;
+  }
+
+  /* Step-by-step Visual Progress */
+  .progress-steps {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+  }
+  .step-box {
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 0.9rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+  .step-box-num {
+    font-size: 1.35rem;
+    font-weight: 800;
+    color: var(--primary);
+  }
+  .step-box-name {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .step-box-desc {
+    font-size: 0.74rem;
+    color: var(--text-muted);
+  }
+
+  /* Match Bar Chart */
+  .match-bars {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+  }
+  .match-bar-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 0.84rem;
+  }
+  .match-bar-label {
+    width: 65px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-align: right;
+  }
+  .match-bar-track {
+    flex: 1;
+    height: 11px;
+    background: #f1f5f9;
+    border-radius: var(--radius-full);
+    overflow: hidden;
+  }
+  .match-bar-fill {
+    height: 100%;
+    border-radius: var(--radius-full);
+    transition: width 0.4s ease;
+  }
+  .match-bar-val {
+    width: 60px;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+  }
+
+  /* Search & Filter Bar */
+  .filter-bar {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    flex-wrap: wrap;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.25rem;
+    box-shadow: var(--shadow-sm);
+  }
+  .filter-input {
+    flex: 1;
+    min-width: 200px;
+    background: #ffffff;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 0.6rem 0.9rem;
+    font-size: 0.9rem;
+    color: var(--text);
+    font-family: inherit;
+  }
+  .filter-input:focus {
+    outline: none;
+    border-color: var(--primary);
+  }
+  .filter-select {
+    background: #ffffff;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 0.6rem 0.9rem;
+    font-size: 0.88rem;
+    color: var(--text);
+    font-family: inherit;
+    cursor: pointer;
+  }
+  .filter-select:focus {
+    outline: none;
+    border-color: var(--primary);
+  }
+
+  /* Job Cards List */
+  .job-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+  }
+  .job-item {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1.3rem 1.5rem;
+    box-shadow: var(--shadow-sm);
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .job-item:hover {
+    border-color: #cbd5e1;
+    box-shadow: var(--shadow-md);
+  }
+  .job-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+  .job-title-link {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--primary);
+    text-decoration: none;
+    line-height: 1.3;
+  }
+  .job-title-link:hover {
+    text-decoration: underline;
+  }
+  .job-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: 0.84rem;
+    color: var(--text-muted);
+    margin-top: 0.25rem;
+    flex-wrap: wrap;
+  }
+  .job-pill {
+    background: #f1f5f9;
+    padding: 0.2rem 0.65rem;
+    border-radius: var(--radius-full);
+    font-weight: 600;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+  }
+  .match-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.35rem 0.85rem;
+    border-radius: var(--radius-full);
+    font-size: 0.84rem;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .match-great {
+    background: var(--success-light);
+    color: var(--success);
+    border: 1px solid #bbf7d0;
+  }
+  .match-good {
+    background: var(--warning-light);
+    color: var(--warning);
+    border: 1px solid #fde68a;
+  }
+  .match-fair {
+    background: #f1f5f9;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+  }
+  .job-reason {
+    font-size: 0.84rem;
+    color: var(--text-muted);
+    background: #f8fafc;
+    border-left: 3px solid var(--primary);
+    padding: 0.55rem 0.85rem;
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    line-height: 1.45;
+  }
+  .job-bottom {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    border-top: 1px solid #f1f5f9;
+    padding-top: 0.75rem;
+    flex-wrap: wrap;
+  }
+  .job-docs {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    font-size: 0.8rem;
+  }
+  .doc-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    padding: 0.3rem 0.65rem;
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    text-decoration: none;
+    font-weight: 500;
+    font-size: 0.78rem;
+  }
+  .doc-btn:hover {
+    background: #f1f5f9;
+    border-color: var(--text-faint);
+  }
+  .job-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  /* Empty States */
+  .empty-state {
+    text-align: center;
+    padding: 3.5rem 1.5rem;
+    background: var(--card);
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-lg);
+  }
+  .empty-icon {
+    font-size: 2.8rem;
+    margin-bottom: 0.75rem;
+  }
+  .empty-title {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 0.4rem;
+  }
+  .empty-desc {
+    font-size: 0.92rem;
+    color: var(--text-muted);
+    max-width: 480px;
+    margin: 0 auto 1.5rem auto;
+    line-height: 1.5;
+  }
+
+  /* Form & Settings Elements */
+  .form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+  .form-group label {
+    font-size: 0.84rem;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .form-group input, .form-group select, .form-group textarea {
+    background: #ffffff;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 0.65rem 0.9rem;
+    font-size: 0.9rem;
+    color: var(--text);
+    font-family: inherit;
     transition: border-color 0.15s ease;
   }
-  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); }
-  textarea { width: 100%; min-height: 260px; font-family: ui-monospace, 'SF Mono', Consolas, monospace; font-size: 0.8rem; line-height: 1.5; }
-  button.action {
-    background: var(--accent); color: #fff; border: none; padding: 0.6rem 1.15rem;
-    border-radius: var(--radius); font-weight: 600; cursor: pointer; font-size: 0.84rem;
-    transition: all 0.15s ease; box-shadow: 0 1px 0 #ffffff22 inset;
+  .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+    outline: none;
+    border-color: var(--primary);
   }
-  button.action:hover:not(:disabled) { background: var(--accent-strong); transform: translateY(-1px); }
-  button.action:active:not(:disabled) { transform: translateY(0); }
-  button.action.danger { background: var(--danger); color: #1a0a0a; }
-  button.action.danger:hover:not(:disabled) { background: #ef4444; }
-  button.action.ghost { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); box-shadow: none; }
-  button.action.ghost:hover:not(:disabled) { background: #ffffff0d; border-color: var(--text-faint); }
-  button.action:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
-  .badge {
-    display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.25rem 0.7rem;
-    border-radius: 999px; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.02em;
+  .form-group textarea {
+    min-height: 180px;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 0.82rem;
+    line-height: 1.45;
   }
-  .badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-  .badge.on { background: var(--ok-bg); color: var(--ok); }
-  .badge.off { background: var(--surface-2); color: var(--text-faint); }
-  .badge.live { background: var(--danger-bg); color: var(--danger); }
-  .badge.stalled { background: var(--danger-bg); color: var(--danger); animation: pulse 2s infinite; }
-  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-  table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
-  th, td { text-align: left; padding: 0.6rem 0.7rem; border-bottom: 1px solid var(--border); }
-  th { color: var(--text-muted); font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; }
-  tbody tr { transition: background 0.1s ease; }
-  tbody tr:hover { background: #ffffff06; }
-  .score { font-weight: 700; }
-  .score-hi { color: var(--ok); } .score-mid { color: var(--warn); } .score-lo { color: var(--text-faint); }
-  .status-needs-login { color: var(--warn); font-weight: 600; }
-  .status-blocked { color: var(--text-faint); }
-  a { color: var(--accent); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  pre.log {
-    background: var(--bg); border: 1px solid var(--border); padding: 1rem; border-radius: var(--radius-sm);
-    max-height: 400px; overflow: auto; font-size: 0.75rem; line-height: 1.5; white-space: pre-wrap;
-    font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+  .tag-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
   }
-  .muted { color: var(--text-faint); font-size: 0.78rem; margin-top: 0.4rem; line-height: 1.5; }
-  .filters { margin-bottom: 1rem; }
-  ::-webkit-scrollbar { width: 10px; height: 10px; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
-  ::-webkit-scrollbar-thumb:hover { background: var(--text-faint); }
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: #f1f5f9;
+    border: 1px solid var(--border);
+    padding: 0.3rem 0.75rem;
+    border-radius: var(--radius-full);
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: var(--text);
+  }
+  .tag-close {
+    cursor: pointer;
+    font-weight: 700;
+    color: var(--text-muted);
+    font-size: 1rem;
+    line-height: 1;
+  }
+  .tag-close:hover {
+    color: var(--danger);
+  }
+
+  /* Toast Notification */
+  .toast {
+    position: fixed;
+    bottom: 2rem;
+    right: 2rem;
+    background: #1e293b;
+    color: #ffffff;
+    padding: 0.85rem 1.4rem;
+    border-radius: var(--radius-md);
+    font-size: 0.9rem;
+    font-weight: 600;
+    box-shadow: var(--shadow-md);
+    opacity: 0;
+    transform: translateY(10px);
+    transition: all 0.25s ease;
+    pointer-events: none;
+    z-index: 1000;
+  }
+  .toast.show {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  /* Activity Feed */
+  .activity-box {
+    background: #0f172a;
+    color: #e2e8f0;
+    border-radius: var(--radius-md);
+    padding: 1.1rem;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    max-height: 240px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+  }
+
+  /* Collapsible Accordion */
+  .accordion-toggle {
+    background: transparent;
+    border: none;
+    color: var(--primary);
+    font-size: 0.88rem;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 0.4rem 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+  .accordion-toggle:hover {
+    text-decoration: underline;
+  }
+
+  @media (max-width: 768px) {
+    .header-inner { padding: 0.75rem 1rem; }
+    main { padding: 1rem; }
+    .hero-top { flex-direction: column; align-items: flex-start; }
+    .job-top { flex-direction: column; }
+    .job-bottom { flex-direction: column; align-items: flex-start; }
+    .stats-grid { grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 480px) {
+    .stats-grid { grid-template-columns: 1fr; }
+  }
 </style>
 </head>
 <body>
+
 <header>
-  <h1>JobPilot Control</h1>
-  <nav>
-    <button data-tab="overview" class="active"><svg class="icon" viewBox="0 0 24 24"><rect x="4" y="10" width="3" height="10" rx="0.5"/><rect x="10.5" y="4" width="3" height="16" rx="0.5"/><rect x="17" y="14" width="3" height="6" rx="0.5"/></svg>Overview</button>
-    <button data-tab="jobs"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="12" rx="2"/><path d="M8 8V6a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>Jobs</button>
-    <button data-tab="queue"><svg class="icon" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>Queue</button>
-    <button data-tab="pipeline"><svg class="icon" viewBox="0 0 24 24"><circle cx="5" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><circle cx="19" cy="6" r="2.5"/><path d="M7 7.5l3 8M17 7.5l-3 8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>Pipeline</button>
-    <button data-tab="agent"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="3 3"/><circle cx="12" cy="12" r="3"/></svg>Agent Loop</button>
-    <button data-tab="activity"><svg class="icon" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>Activity</button>
-    <button data-tab="settings"><svg class="icon" viewBox="0 0 24 24"><path d="M4 6h6M14 6h6M4 12h10M18 12h2M4 18h13M20 18h0" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="6" r="2.2"/><circle cx="16" cy="12" r="2.2"/><circle cx="19" cy="18" r="2.2"/></svg>Settings</button>
-  </nav>
+  <div class="header-inner">
+    <a href="#" class="brand" onclick="switchTab('home'); return false;">
+      <div class="brand-logo">JP</div>
+      <div>
+        <div class="brand-title">JobPilot</div>
+        <div class="brand-sub">Your AI Job Search Assistant</div>
+      </div>
+    </a>
+
+    <nav>
+      <button data-tab="home" class="active" onclick="switchTab('home')">🏠 Home</button>
+      <button data-tab="jobs" onclick="switchTab('jobs')">💼 My Jobs</button>
+      <button data-tab="settings" onclick="switchTab('settings')">⚙️ Settings</button>
+    </nav>
+
+    <div class="header-actions">
+      <div id="header-status" class="status-badge">
+        <span class="status-dot"></span>
+        <span id="header-status-text">Ready</span>
+      </div>
+      <button class="btn-emergency" onclick="emergencyStop()" title="Immediately stops all searches and applications">
+        🛑 Stop All
+      </button>
+    </div>
+  </div>
 </header>
+
 <main>
 
-  <section id="overview" class="tab active">
-    <div class="panel">
-      <h2><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M7 12h3l2-4 2 8 2-4h1"/></svg>System health</h2>
-      <div id="health-loops"></div>
-      <div class="cards" id="health-counters" style="margin-top:0.8rem"></div>
-      <div id="health-stages" style="margin-top:0.8rem"></div>
-      <div id="health-matches" style="margin-top:0.8rem"></div>
+  <!-- ================= TAB 1: HOME ================= -->
+  <section id="tab-home" class="tab-pane active">
+
+    <!-- Welcome & Control Hero -->
+    <div class="hero-card">
+      <div class="hero-top">
+        <div class="hero-info">
+          <h2>Job Search Assistant</h2>
+          <p>JobPilot automatically discovers job openings, matches them to your background, prepares customized resumes, and helps you apply effortlessly.</p>
+        </div>
+        <div class="hero-controls">
+          <button id="btn-main-search" class="btn btn-primary btn-lg" onclick="toggleMainSearch()">
+            🚀 Start Finding Jobs
+          </button>
+          <button id="btn-quick-search" class="btn btn-secondary btn-lg" onclick="runQuickSearch()" title="Run a single search pass now">
+            ⚡ Quick Search
+          </button>
+        </div>
+      </div>
+
+      <!-- Controls & Toggles -->
+      <div class="switches-grid">
+        <div class="switch-row">
+          <div class="switch-label-group">
+            <span class="switch-title">Automatic Submissions</span>
+            <span class="switch-desc" id="auto-apply-desc">OFF — Prepares applications for your review in My Jobs</span>
+          </div>
+          <button id="auto-apply-toggle-btn" class="toggle-btn" onclick="toggleAutoApplyMode()">Enable</button>
+        </div>
+
+        <div class="switch-row">
+          <div class="switch-label-group">
+            <span class="switch-title">Application Mode</span>
+            <span class="switch-desc" id="live-mode-desc">Test Drafts (Dry-run) — No real submissions</span>
+          </div>
+          <button id="live-mode-toggle-btn" class="btn btn-secondary btn-sm" onclick="toggleLiveMode()">Switch to Live</button>
+        </div>
+      </div>
     </div>
-    <div class="cards" id="stat-cards"></div>
-    <div class="panel">
-      <h2><svg class="icon" viewBox="0 0 24 24"><path d="M3 20L12 6l9 14z"/></svg>Score Distribution</h2>
-      <div id="score-dist"></div>
-      <p class="muted" id="score-dist-note" style="margin-top:0.5rem"></p>
+
+    <!-- 4 Big Friendly Numbers -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-card-top">
+          <span class="stat-label">Jobs Found</span>
+          <span class="stat-icon">💼</span>
+        </div>
+        <div class="stat-num" id="stat-found">0</div>
+        <div class="stat-desc">Total job postings discovered</div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-card-top">
+          <span class="stat-label">Top Matches</span>
+          <span class="stat-icon">⭐</span>
+        </div>
+        <div class="stat-num" id="stat-matches" style="color:var(--success);">0</div>
+        <div class="stat-desc">Highly rated for your profile</div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-card-top">
+          <span class="stat-label">Ready to Apply</span>
+          <span class="stat-icon">📝</span>
+        </div>
+        <div class="stat-num" id="stat-ready" style="color:var(--primary);">0</div>
+        <div class="stat-desc">Resume & letter customized</div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-card-top">
+          <span class="stat-label">Applications Sent</span>
+          <span class="stat-icon">🚀</span>
+        </div>
+        <div class="stat-num" id="stat-applied" style="color:#059669;">0</div>
+        <div class="stat-desc">Successfully submitted</div>
+      </div>
     </div>
+
+    <!-- Step-by-Step Progress -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">📊 How Your Search Is Progressing</span>
+      </div>
+      <div class="progress-steps">
+        <div class="step-box">
+          <span class="step-box-num" id="step-discovered">0</span>
+          <span class="step-box-name">1. Found Listings</span>
+          <span class="step-box-desc">Searched across job sites</span>
+        </div>
+        <div class="step-box">
+          <span class="step-box-num" id="step-enriched">0</span>
+          <span class="step-box-name">2. Details Gathered</span>
+          <span class="step-box-desc">Full job descriptions loaded</span>
+        </div>
+        <div class="step-box">
+          <span class="step-box-num" id="step-scored">0</span>
+          <span class="step-box-name">3. Match Evaluated</span>
+          <span class="step-box-desc">Rated against your background</span>
+        </div>
+        <div class="step-box">
+          <span class="step-box-num" id="step-tailored">0</span>
+          <span class="step-box-name">4. Resumes Prepared</span>
+          <span class="step-box-desc">Custom resume & letter ready</span>
+        </div>
+        <div class="step-box">
+          <span class="step-box-num" id="step-applied">0</span>
+          <span class="step-box-name">5. Applications Sent</span>
+          <span class="step-box-desc">Completed job submissions</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Match Quality Breakdown -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">🎯 Match Quality Breakdown</span>
+      </div>
+      <p class="card-sub">Distribution of how closely discovered jobs match your target role and skills.</p>
+      <div id="match-bars-container" class="match-bars">
+        <p style="color:var(--text-muted);font-size:0.88rem;">No rated jobs yet. Click 'Start Finding Jobs' to begin.</p>
+      </div>
+      <p id="match-dist-note" style="font-size:0.78rem;color:var(--text-muted);margin-top:0.75rem;"></p>
+    </div>
+
+    <!-- Recent Updates (Activity Log) -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">📋 Recent Updates</span>
+        <span id="activity-status-badge" class="status-badge">Idle</span>
+      </div>
+      <div id="activity-log-box" class="activity-box">Starting assistant logs...</div>
+    </div>
+
   </section>
 
-  <section id="jobs" class="tab">
-    <div class="filters row">
-      <label>Min score</label>
-      <input type="number" id="job-min-score" value="0" style="max-width:80px">
-      <label>Location</label>
-      <input type="text" id="job-location" placeholder="e.g. Dubai, Remote (comma-separated, blank = all)" style="max-width:260px">
-      <button class="action ghost" onclick="useTargetLocationFilter()">Use my target location</button>
-      <button class="action ghost" onclick="loadJobs()">Refresh</button>
+
+  <!-- ================= TAB 2: MY JOBS ================= -->
+  <section id="tab-jobs" class="tab-pane">
+
+    <!-- Search & Filter Controls -->
+    <div class="filter-bar">
+      <input type="text" id="job-search-input" class="filter-input" placeholder="Search by job title or keyword..." oninput="filterJobsClientSide()">
+
+      <select id="job-score-filter" class="filter-select" onchange="loadJobs()">
+        <option value="0">All Match Ratings</option>
+        <option value="8">Top Matches Only (8-10)</option>
+        <option value="6" selected>Good Matches (6-10)</option>
+        <option value="4">Moderate & Above (4-10)</option>
+      </select>
+
+      <input type="text" id="job-location-input" class="filter-input" placeholder="Location (e.g. your city, Remote)" style="max-width:240px;">
+
+      <button class="btn btn-secondary btn-sm" onclick="useTargetLocationFilter()">
+        📍 Use Saved Location
+      </button>
+
+      <button class="btn btn-primary btn-sm" onclick="loadJobs()">
+        🔄 Refresh
+      </button>
     </div>
-    <div class="panel">
-      <table>
-        <thead><tr><th>Score</th><th>Title</th><th>Site</th><th>Status</th><th></th></tr></thead>
-        <tbody id="jobs-body"></tbody>
-      </table>
+
+    <!-- Job Count Summary -->
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem;padding:0 0.25rem;">
+      <span id="jobs-count-text" style="font-size:0.9rem;font-weight:600;color:var(--text-muted);">Loading jobs...</span>
     </div>
+
+    <!-- Jobs List Container -->
+    <div id="jobs-container" class="job-list">
+      <!-- Jobs will be rendered here dynamically -->
+    </div>
+
   </section>
 
-  
-  <section id="queue" class="tab">
-    <div class="panel">
-      <h2><svg class="icon" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>Apply Queue</h2>
-      <p class="muted" id="queue-status">Jobs ready to apply: <span id="queue-count">0</span></p>
-      <div id="queue-list" style="max-height:60vh;overflow:auto;"></div>
-    </div>
-  </section>
 
-<section id="pipeline" class="tab">
-    <div class="panel">
-      <h2><svg class="icon" viewBox="0 0 24 24"><circle cx="5" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><circle cx="19" cy="6" r="2.5"/><path d="M7 7.5l3 8M17 7.5l-3 8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>Ad-hoc pipeline run <span id="pipe-badge" class="badge off">stopped</span></h2>
-      <p class="muted">Runs a single pass now, independent of the scheduled Agent Loop. Only one of (this run / the loop) can be active at a time.</p>
-      <div class="row" style="margin-top:0.75rem">
-        <button class="action ghost" onclick="runStage(['discover'])">Discover only</button>
-        <button class="action ghost" onclick="runStage(['enrich'])">Enrich only</button>
-        <button class="action ghost" onclick="runStage(['score'])">Score only</button>
-        <button class="action ghost" onclick="runStage(['tailor'])">Tailor only</button>
-        <button class="action ghost" onclick="runStage(['cover'])">Cover letters only</button>
-      </div>
-      <div class="row">
-        <button class="action" onclick="runStage(['discover','enrich','score','tailor','cover','pdf'], true)">Full pipeline (streaming -- stages overlap)</button>
-        <button class="action danger" onclick="stopPipeline()">Stop current run</button>
-      </div>
-      <p class="muted">Streaming mode lets scoring start on jobs as they're discovered instead of waiting for discovery to finish -- reduces wall-clock, doesn't increase LLM throughput (still bound by whichever provider is configured in Settings).</p>
-      <h2 style="margin-top:1.5rem">Recent log</h2>
-      <pre class="log" id="pipe-log">(no log yet)</pre>
-    </div>
-  </section>
+  <!-- ================= TAB 3: SETTINGS ================= -->
+  <section id="tab-settings" class="tab-pane">
 
-  <section id="agent" class="tab">
-    <div class="panel">
-      <h2><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="3 3"/><circle cx="12" cy="12" r="3"/></svg>Loop status <span id="loop-badge" class="badge off">stopped</span> <span id="live-badge" class="badge off">dry-run</span> <span id="engine-badge" class="badge off">claude</span></h2>
-      <div class="row">
-        <button class="action" onclick="startLoop()">Start</button>
-        <button class="action danger" onclick="stopLoop()">Stop</button>
-        <button class="action ghost" id="live-toggle" onclick="toggleLive()">Enable live submit</button>
+    <!-- Multi-User Profiles -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">👤 User Profiles</span>
       </div>
-      <p class="muted">Dry-run fills forms but never clicks submit. Live mode submits real applications. Toggle takes effect on the loop's next apply cycle.</p>
-      <div class="row" style="margin-top:1rem">
-        <label>Apply engine</label>
-        <select id="engine-select">
-          <option value="claude">Claude Code (spawns a Claude session per job, costs API usage)</option>
-          <option value="local">Local LLM (drives the browser via the LLM configured in Settings, no Claude Code usage)</option>
-        </select>
-        <button class="action ghost" onclick="saveEngine()">Save</button>
+      <p class="card-sub">Switch between different user profiles or create a new one for someone else.</p>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Active Profile</label>
+          <div style="display:flex;gap:0.5rem;">
+            <select id="profile-select" style="flex:1;"></select>
+            <button class="btn btn-secondary btn-sm" onclick="switchProfile()">Switch</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Create New Profile</label>
+          <div style="display:flex;gap:0.5rem;">
+            <input type="text" id="new-profile-name" placeholder="e.g. Jane">
+            <button class="btn btn-primary btn-sm" onclick="createProfile()">Create</button>
+          </div>
+        </div>
       </div>
-      <div class="row" style="margin-top:1rem;align-items:center;">
-        <label style="min-width:auto;margin-right:0.5rem;">Auto-Apply Mode</label>
-        <button id="auto-apply-btn" class="action" onclick="toggleAutoApply()" style="background:var(--text-faint);">Enable</button>
-        <p class="muted" style="margin-left:0.5rem;flex:1;">Continuously applies to ready jobs without stopping</p>
-      </div>
-      <div class="row" style="margin-top:0.25rem">
-        <p class="muted" id="auto-apply-status">Auto-apply is OFF. Jobs will queue until you manually apply.</p>
-      </div>
-      <h2 style="margin-top:1.5rem">Recent log</h2>
-      <pre class="log" id="loop-log">(no log yet)</pre>
-    </div>
-  </section>
-
-  
-  <section id="activity" class="tab">
-    <div class="panel">
-      <h2><svg class="icon" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>Live Activity</h2>
-      <div class="row" style="justify-content:space-between;align-items:center;">
-        <p class="muted">Real-time pipeline and apply activity</p>
-        <span id="activity-status" class="badge off">paused</span>
-      </div>
-      <pre id="activity-feed" style="max-height:55vh;overflow:auto;font-size:0.78rem;background:var(--bg-alt);padding:0.75rem;border-radius:8px;"></pre>
-    </div>
-  </section>
-
-<section id="settings" class="tab">
-    <div class="panel">
-      <h2><svg class="icon" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M2 21c0-3.6 3.1-6.5 7-6.5s7 2.9 7 6.5"/><circle cx="18" cy="8" r="2.4" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M16 14.6c2.7.5 4.6 2.7 4.6 6.1" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Profiles</h2>
-      <p class="muted" style="margin-bottom:0.75rem">Each profile keeps its own resume, jobs, searches, and settings -- use one per person sharing this install.</p>
-      <div class="row">
-        <label>Active</label>
-        <select id="profile-select"></select>
-        <button class="action" onclick="switchProfile()">Switch</button>
-      </div>
-      <div class="row" style="margin-top:0.5rem">
-        <label>New profile</label>
-        <input type="text" id="new-profile-name" placeholder="e.g. jane">
-        <button class="action ghost" onclick="createProfile()">Create</button>
-      </div>
-      <p class="muted" id="profile-status" style="margin-top:0.5rem"></p>
+      <p id="profile-status" style="font-size:0.82rem;color:var(--text-muted);"></p>
     </div>
 
-    <div class="panel">
-      <h2><svg class="icon" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>LLM Provider</h2>
-      <div class="row">
-        <label>Provider</label>
-        <select id="llm-provider">
-          <option value="gemini">Gemini (cloud)</option>
-          <option value="openai">OpenAI (cloud)</option>
-          <option value="local">Local (llama.cpp / Ollama)</option>
-        </select>
+    <!-- Personal Profile & Resume Info -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">📄 Profile & Resume Details</span>
       </div>
-      <div class="row" id="row-local-url"><label>Local URL</label><input type="text" id="llm-url" placeholder="http://127.0.0.1:8080/v1"></div>
-      <div class="row"><label>Model</label><input type="text" id="llm-model" placeholder="gemini-2.0-flash / local-model"></div>
-      <div class="row" id="row-gemini-key"><label>Gemini key</label><input type="password" id="gemini-key" placeholder="(unchanged if blank)"></div>
-      <div class="row" id="row-openai-key"><label>OpenAI key</label><input type="password" id="openai-key" placeholder="(unchanged if blank)"></div>
-      <div class="row" id="row-local-key"><label>Local API key</label><input type="password" id="llm-api-key" placeholder="(optional, unchanged if blank)"></div>
-      <button class="action" onclick="saveLlm()">Save</button>
-      <p class="muted" id="llm-current"></p>
-    </div>
+      <p class="card-sub">JobPilot uses this information to match jobs and customize your resume for applications.</p>
 
-    <div class="panel">
-      <h2><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-7 8-7s8 3 8 7z"/></svg>Personal Details</h2>
-      <div class="row"><label>Full name</label><input type="text" id="p-full_name"></div>
-      <div class="row"><label>Preferred name</label><input type="text" id="p-preferred_name"></div>
-      <div class="row"><label>Email</label><input type="text" id="p-email"></div>
-      <div class="row"><label>Phone</label><input type="text" id="p-phone"></div>
-      <div class="row"><label>City</label><input type="text" id="p-city"></div>
-      <div class="row"><label>Country</label><input type="text" id="p-country"></div>
-      <div class="row"><label>LinkedIn</label><input type="text" id="p-linkedin_url"></div>
-      <h2 style="margin-top:1.25rem;font-size:0.85rem">Work authorization</h2>
-      <div class="row">
-        <label>Authorized</label>
-        <select id="p-legally_authorized_to_work"><option value="Yes">Yes</option><option value="No">No</option></select>
-        <label>Needs sponsorship</label>
-        <select id="p-require_sponsorship"><option value="No">No</option><option value="Yes">Yes</option></select>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Full Name</label>
+          <input type="text" id="p-full_name" placeholder="e.g. Jane Doe">
+        </div>
+        <div class="form-group">
+          <label>Preferred Name</label>
+          <input type="text" id="p-preferred_name" placeholder="e.g. Jane">
+        </div>
+        <div class="form-group">
+          <label>Email Address</label>
+          <input type="text" id="p-email" placeholder="jane@example.com">
+        </div>
+        <div class="form-group">
+          <label>Phone Number</label>
+          <input type="text" id="p-phone" placeholder="+1 (555) 000-0000">
+        </div>
+        <div class="form-group">
+          <label>City</label>
+          <input type="text" id="p-city" placeholder="e.g. your city">
+        </div>
+        <div class="form-group">
+          <label>Country</label>
+          <input type="text" id="p-country" placeholder="e.g. your country">
+        </div>
+        <div class="form-group">
+          <label>LinkedIn Profile</label>
+          <input type="text" id="p-linkedin_url" placeholder="https://linkedin.com/in/username">
+        </div>
       </div>
-      <div class="row"><label>Permit type</label><input type="text" id="p-work_permit_type"></div>
-      <h2 style="margin-top:1.25rem;font-size:0.85rem">Compensation</h2>
-      <div class="row">
-        <label>Currency</label><input type="text" id="p-salary_currency" style="max-width:90px">
-        <label>Target</label><input type="text" id="p-salary_expectation" style="max-width:120px">
-        <label>Min</label><input type="text" id="p-salary_range_min" style="max-width:120px">
-        <label>Max</label><input type="text" id="p-salary_range_max" style="max-width:120px">
+
+      <div class="card-title" style="font-size:1rem;margin:1.25rem 0 0.5rem 0;">💼 Career & Work Authorization</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Target Job Title / Role</label>
+          <input type="text" id="p-target_role" placeholder="e.g. Senior Software Engineer">
+        </div>
+        <div class="form-group">
+          <label>Total Years of Experience</label>
+          <input type="text" id="p-years_of_experience_total" placeholder="e.g. 5">
+        </div>
+        <div class="form-group">
+          <label>Education Level</label>
+          <input type="text" id="p-education_level" placeholder="e.g. Bachelor's in Computer Science">
+        </div>
+        <div class="form-group">
+          <label>Legally Authorized to Work?</label>
+          <select id="p-legally_authorized_to_work">
+            <option value="Yes">Yes</option>
+            <option value="No">No</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Require Visa Sponsorship?</label>
+          <select id="p-require_sponsorship">
+            <option value="No">No</option>
+            <option value="Yes">Yes</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Work Permit Type</label>
+          <input type="text" id="p-work_permit_type" placeholder="e.g. Citizen, Permanent Resident, etc.">
+        </div>
       </div>
-      <h2 style="margin-top:1.25rem;font-size:0.85rem">Experience</h2>
-      <div class="row"><label>Target role</label><input type="text" id="p-target_role"></div>
-      <div class="row">
-        <label>Years exp.</label><input type="text" id="p-years_of_experience_total" style="max-width:80px">
-        <label>Education</label><input type="text" id="p-education_level">
+
+      <div class="card-title" style="font-size:1rem;margin:1.25rem 0 0.5rem 0;">💰 Compensation Expectations</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Currency</label>
+          <input type="text" id="p-salary_currency" placeholder="e.g. AED or USD">
+        </div>
+        <div class="form-group">
+          <label>Target Salary</label>
+          <input type="text" id="p-salary_expectation" placeholder="e.g. 120000">
+        </div>
+        <div class="form-group">
+          <label>Minimum Acceptable</label>
+          <input type="text" id="p-salary_range_min" placeholder="e.g. 100000">
+        </div>
+        <div class="form-group">
+          <label>Maximum Range</label>
+          <input type="text" id="p-salary_range_max" placeholder="e.g. 150000">
+        </div>
       </div>
-      <div class="row" style="margin-top:0.75rem">
-        <button class="action" onclick="saveProfileForm()">Save profile</button>
-        <button class="action ghost" onclick="toggleRawProfile()" id="raw-profile-toggle">Show raw JSON (advanced)</button>
+
+      <div style="margin-top:1.25rem;display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
+        <button class="btn btn-primary" onclick="saveProfileForm()">
+          💾 Save Profile Information
+        </button>
+        <button class="accordion-toggle" onclick="toggleRawProfile()" id="raw-profile-toggle">
+          ⚙️ Advanced: View / Edit Full Profile Data (JSON)
+        </button>
       </div>
-      <div id="raw-profile-wrap" style="display:none;margin-top:0.75rem">
-        <p class="muted" style="margin-bottom:0.5rem">Full profile including skills, resume_facts, EEO. Editing here overrides the form fields above on save.</p>
-        <textarea id="profile-json"></textarea>
-        <div class="row" style="margin-top:0.75rem"><button class="action ghost" onclick="saveProfile()">Save raw JSON</button></div>
+
+      <div id="raw-profile-wrap" style="display:none;margin-top:1rem;">
+        <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:0.5rem;">
+          Full profile including resume history, skills, and facts. Editing here overrides form fields on save.
+        </p>
+        <textarea id="profile-json" class="form-group" style="width:100%;height:220px;"></textarea>
+        <div style="margin-top:0.5rem;">
+          <button class="btn btn-secondary btn-sm" onclick="saveProfile()">Save Raw Profile JSON</button>
+        </div>
       </div>
     </div>
 
-    <div class="panel">
-      <h2><svg class="icon" viewBox="0 0 24 24"><path d="M12 21s7-6.5 7-12a7 7 0 1 0-14 0c0 5.5 7 12 7 12z"/></svg>Target Location</h2>
-      <p class="muted" style="margin-bottom:0.75rem">Controls which jobs pass discovery's location filter. Non-remote postings only pass if their location matches one of the accepted cities/countries below.</p>
-      <div class="row">
-        <button class="action ghost" onclick="applyLocationPreset('dubai')">Dubai + Remote</button>
-        <button class="action ghost" onclick="applyLocationPreset('remote')">Remote only</button>
+    <!-- Location & Search Preferences -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">📍 Location & Search Preferences</span>
       </div>
-      <div class="row"><label>Primary city</label><input type="text" id="loc-primary" placeholder="e.g. Dubai, United Arab Emirates"></div>
-      <div class="row">
-        <label>Remote OK</label>
-        <select id="loc-remote"><option value="true">Yes</option><option value="false">No</option></select>
+      <p class="card-sub">Choose where you want to find jobs.</p>
+
+      <div style="display:flex;gap:0.6rem;margin-bottom:1rem;flex-wrap:wrap;">
+        <button class="btn btn-secondary btn-sm" onclick="applyLocationPreset('mycity')">🏠 My City + Remote</button>
+        <button class="btn btn-secondary btn-sm" onclick="applyLocationPreset('remote')">🌍 Remote Only</button>
       </div>
-      <div class="row"><label>Accepted</label><input type="text" id="loc-accept-input" placeholder="Add a city or country, e.g. Abu Dhabi"><button class="action ghost" onclick="addAcceptedLocation()">Add</button></div>
-      <div class="row" id="loc-accept-tags"></div>
-      <div class="row" style="margin-top:0.5rem"><button class="action" onclick="saveLocation()">Save location</button></div>
+
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Primary Location</label>
+          <input type="text" id="loc-primary" placeholder="e.g. your city, your country">
+        </div>
+        <div class="form-group">
+          <label>Include Remote Jobs?</label>
+          <select id="loc-remote">
+            <option value="true">Yes — Include Remote Positions</option>
+            <option value="false">No — Onsite / Hybrid Only</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-group" style="margin-bottom:1rem;">
+        <label>Accepted Cities & Countries</label>
+        <div style="display:flex;gap:0.5rem;">
+          <input type="text" id="loc-accept-input" placeholder="Add a city or country, e.g. Abu Dhabi" style="flex:1;">
+          <button class="btn btn-secondary btn-sm" onclick="addAcceptedLocation()">+ Add Location</button>
+        </div>
+        <div id="loc-accept-tags" class="tag-container"></div>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
+        <button class="btn btn-primary" onclick="saveLocation()">
+          💾 Save Location Preferences
+        </button>
+        <button class="accordion-toggle" onclick="toggleRawSearches()" id="raw-searches-toggle">
+          ⚙️ Advanced: Search Queries & Keywords (YAML)
+        </button>
+      </div>
+
+      <div id="raw-searches-wrap" style="display:none;margin-top:1rem;">
+        <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:0.5rem;">
+          Configure specific search queries, websites, and search filters.
+        </p>
+        <textarea id="searches-yaml" class="form-group" style="width:100%;height:220px;"></textarea>
+        <div style="margin-top:0.5rem;">
+          <button class="btn btn-secondary btn-sm" onclick="saveSearches()">Save Search Config</button>
+        </div>
+      </div>
     </div>
 
-    <div class="panel">
-      <h2><svg class="icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M21 21l-4.3-4.3" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>Search config (raw YAML)</h2>
-      <p class="muted" style="margin-bottom:0.5rem">Queries, tiers, and everything else. Saving Target Location above regenerates this file's location fields (comments there are lost); edit here for anything else.</p>
-      <textarea id="searches-yaml"></textarea>
-      <div class="row" style="margin-top:0.75rem"><button class="action" onclick="saveSearches()">Save searches</button></div>
+    <!-- AI Assistant Setup -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">🤖 AI Assistant Settings</span>
+      </div>
+      <p class="card-sub">Choose which AI service analyzes jobs and customizes resumes. Keys are stored locally on your computer.</p>
+
+      <div class="form-grid">
+        <div class="form-group">
+          <label>AI Provider</label>
+          <select id="llm-provider" onchange="updateLlmRows()">
+            <option value="gemini">Google Gemini (Cloud)</option>
+            <option value="openai">OpenAI (Cloud)</option>
+            <option value="local">Local AI (Ollama / llama.cpp)</option>
+          </select>
+        </div>
+        <div class="form-group" id="row-gemini-key">
+          <label>Google Gemini API Key</label>
+          <input type="password" id="gemini-key" placeholder="(Keep blank to leave unchanged)">
+        </div>
+        <div class="form-group" id="row-openai-key" style="display:none;">
+          <label>OpenAI API Key</label>
+          <input type="password" id="openai-key" placeholder="(Keep blank to leave unchanged)">
+        </div>
+        <div class="form-group" id="row-local-url" style="display:none;">
+          <label>Local AI Server Address</label>
+          <input type="text" id="llm-url" placeholder="http://127.0.0.1:8080/v1">
+        </div>
+        <div class="form-group" id="row-local-key" style="display:none;">
+          <label>Local AI API Key (Optional)</label>
+          <input type="password" id="llm-api-key" placeholder="(Optional, leave blank if none)">
+        </div>
+        <div class="form-group">
+          <label>AI Model Name</label>
+          <input type="text" id="llm-model" placeholder="e.g. gemini-2.0-flash">
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:0.5rem;flex-wrap:wrap;gap:0.75rem;">
+        <button class="btn btn-primary" onclick="saveLlm()">
+          💾 Save AI Settings
+        </button>
+        <span id="llm-current" style="font-size:0.82rem;color:var(--text-muted);"></span>
+      </div>
     </div>
+
   </section>
 
 </main>
+
+<!-- Toast Notification -->
+<div id="toast-msg" class="toast">✓ Saved successfully</div>
+
 <script>
 function $(id) { return document.getElementById(id); }
 
-document.querySelectorAll('nav button').forEach(b => b.addEventListener('click', () => {
-  document.querySelectorAll('nav button').forEach(x => x.classList.remove('active'));
-  document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
-  b.classList.add('active');
-  $(b.dataset.tab).classList.add('active');
-  if (b.dataset.tab === 'jobs') loadJobs();
-  if (b.dataset.tab === 'pipeline') loadPipeline();
-  if (b.dataset.tab === 'agent') loadLoop();
-  if (b.dataset.tab === 'settings') loadSettings();
-  loadQueue();
-  loadActivity();
-  loadStageProgress();
-  loadAutoApplyStatus();
-}));
-
-async function loadPipeline() {
-  const s = await (await fetch('/api/pipeline/status')).json();
-  $('pipe-badge').textContent = s.running ? 'running' : 'stopped';
-  $('pipe-badge').className = 'badge ' + (s.running ? 'on' : 'off');
-  $('pipe-log').textContent = s.log_tail || '(no log yet)';
+function showToast(msg) {
+  const t = $('toast-msg');
+  t.textContent = msg || '✓ Saved successfully';
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3000);
 }
-async function runStage(stages, stream) {
-  const resp = await fetch('/api/pipeline/run', {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({stages, stream: !!stream, workers: 4}),
+
+// Tab Switching
+function switchTab(tabName) {
+  document.querySelectorAll('nav button').forEach(b => {
+    b.classList.toggle('active', b.dataset.tab === tabName);
   });
-  if (!resp.ok) { const e = await resp.json(); alert(e.error || 'Failed to start'); }
-  loadPipeline();
-}
-async function stopPipeline() { await fetch('/api/pipeline/stop', {method:'POST'}); loadPipeline(); }
-
-async function loadHealth() {
-  let h;
-  try { h = await (await fetch('/api/health')).json(); }
-  catch (e) { $('health-loops').innerHTML = '<p class="muted">health unavailable</p>'; return; }
-  if (h.error) { $('health-loops').innerHTML = `<p class="muted">${h.error}</p>`; return; }
-
-  const tone = { RUNNING:'on', 'LIKELY UP':'on', STALLED:'stalled', STOPPED:'off', UNKNOWN:'stalled' };
-  $('health-loops').innerHTML = (h.loops || []).map(l => `
-    <div style="display:flex;align-items:center;gap:0.7rem;margin-bottom:0.4rem">
-      <span style="min-width:6rem;font-weight:600">${l.label}</span>
-      <span class="badge ${tone[l.state] || 'off'}">${l.state}</span>
-      <span class="muted" style="font-size:0.82rem">pid ${l.pid ?? '-'} &middot; ${l.note}</span>
-    </div>`).join('');
-
-  const c = h.counters || {};
-  // acquirable is the blocked-site-aware count; the older "Ready to apply"
-  // card below ignores that filter and reads high.
-  const counters = [
-    [c.new_last_hour, 'New last hour'],
-    [c.unscored_backlog, 'Unscored backlog'],
-    [c.acquirable, 'Acquirable to apply'],
-    [c.manual, 'Retired as manual'],
-  ];
-  $('health-counters').innerHTML = counters.map(([v, label]) =>
-    `<div class="card"><div class="num">${v ?? 0}</div><div class="label">${label}</div></div>`).join('');
-
-  const rows = (h.stages || []).map(st => `
-    <tr><td>${st.stage}</td>
-        <td style="text-align:right">${st.total}</td>
-        <td style="text-align:right">${st.last_24h}</td></tr>`).join('');
-  $('health-stages').innerHTML = `
-    <table style="width:100%;font-size:0.85rem">
-      <thead><tr><th style="text-align:left">stage</th>
-        <th style="text-align:right">total</th>
-        <th style="text-align:right">last 24h</th></tr></thead>
-      <tbody>${rows}</tbody></table>`;
-
-  const m = h.matches || [];
-  $('health-matches').innerHTML = m.length ? `
-    <p class="muted" style="margin:0 0 0.4rem">Recent fast-lane matches (prepared, awaiting you)</p>
-    ${m.map(j => `<div style="display:flex;gap:0.6rem;align-items:baseline;margin-bottom:0.25rem">
-        <span class="badge on">${j.fit_score ?? '?'}</span>
-        <a href="${j.application_url || j.url}" target="_blank" rel="noopener">${(j.title || '?')}</a>
-      </div>`).join('')}`
-    : '<p class="muted">No prepared fast-lane matches yet.</p>';
+  document.querySelectorAll('.tab-pane').forEach(p => {
+    p.classList.toggle('active', p.id === 'tab-' + tabName);
+  });
+  if (tabName === 'home') loadHome();
+  if (tabName === 'jobs') loadJobs();
+  if (tabName === 'settings') loadSettings();
 }
 
-async function loadStats() {
-  const s = await (await fetch('/api/stats')).json();
-  const cards = [
-    ['total', 'Discovered'], ['scored', 'Scored'], ['tailored', 'Tailored'],
-    ['with_cover_letter', 'Cover letters'], ['ready_to_apply', 'Prepared (all sites)'], ['applied', 'Applied'],
-  ];
-  $('stat-cards').innerHTML = cards.map(([k, label]) =>
-    `<div class="card"><div class="num">${s[k] ?? 0}</div><div class="label">${label}</div></div>`
-  ).join('');
-  const dist = s.score_distribution || [];
+// ---------------------------------------------------------------------------
+// Home Tab Logic & Assistant Controls
+// ---------------------------------------------------------------------------
+let _isAssistantRunning = false;
+
+async function loadHome() {
+  try {
+    const [stats, stageProg, loopStatus, autoApplyStatus, health] = await Promise.all([
+      fetch('/api/stats').then(r => r.json()).catch(() => ({})),
+      fetch('/api/stage-progress').then(r => r.json()).catch(() => ({})),
+      fetch('/api/loop/status').then(r => r.json()).catch(() => ({})),
+      fetch('/api/auto-apply/status').then(r => r.json()).catch(() => ({})),
+      fetch('/api/health').then(r => r.json()).catch(() => ({})),
+    ]);
+
+    // Update Big Stat Numbers
+    const totalFound = stageProg.discovered ?? stats.total ?? 0;
+    const topMatches = stageProg.high_fit ?? stats.scored ?? 0;
+    const readyToApply = stageProg.ready_to_apply ?? stats.ready_to_apply ?? 0;
+    const appliedCount = stageProg.applied ?? stats.applied ?? 0;
+
+    $('stat-found').textContent = totalFound.toLocaleString();
+    $('stat-matches').textContent = topMatches.toLocaleString();
+    $('stat-ready').textContent = readyToApply.toLocaleString();
+    $('stat-applied').textContent = appliedCount.toLocaleString();
+
+    // Step by step progress
+    $('step-discovered').textContent = (stageProg.discovered ?? stats.total ?? 0).toLocaleString();
+    $('step-enriched').textContent = (stageProg.enriched ?? stats.with_description ?? 0).toLocaleString();
+    $('step-scored').textContent = (stageProg.scored ?? stats.scored ?? 0).toLocaleString();
+    $('step-tailored').textContent = (stageProg.tailored ?? stats.tailored ?? 0).toLocaleString();
+    $('step-applied').textContent = (stageProg.applied ?? stats.applied ?? 0).toLocaleString();
+
+    // Loop & Assistant Status
+    _isAssistantRunning = !!(loopStatus.running || (health.loops && health.loops.some(l => l.state === 'RUNNING')));
+    const isStalled = !!loopStatus.stalled;
+
+    const headerBadge = $('header-status');
+    const headerText = $('header-status-text');
+    const mainBtn = $('btn-main-search');
+
+    if (isStalled) {
+      headerBadge.className = 'status-badge stalled';
+      headerText.textContent = 'Attention Needed';
+      mainBtn.textContent = '⏸️ Stop Assistant';
+      mainBtn.className = 'btn btn-danger-outline btn-lg';
+    } else if (_isAssistantRunning) {
+      headerBadge.className = 'status-badge active';
+      headerText.textContent = 'Searching & Preparing';
+      mainBtn.textContent = '⏸️ Pause Assistant';
+      mainBtn.className = 'btn btn-danger-outline btn-lg';
+    } else {
+      headerBadge.className = 'status-badge';
+      headerText.textContent = 'Ready';
+      mainBtn.textContent = '🚀 Start Finding Jobs';
+      mainBtn.className = 'btn btn-primary btn-lg';
+    }
+
+    // Auto-Apply Toggle state
+    const autoBtn = $('auto-apply-toggle-btn');
+    const autoDesc = $('auto-apply-desc');
+    if (autoApplyStatus.enabled) {
+      autoBtn.textContent = 'Disable';
+      autoBtn.className = 'toggle-btn on';
+      autoDesc.textContent = 'ON — Prepares and applies automatically to top matching jobs';
+    } else {
+      autoBtn.textContent = 'Enable';
+      autoBtn.className = 'toggle-btn';
+      autoDesc.textContent = 'OFF — Prepares applications for your review in My Jobs';
+    }
+
+    // Live vs Dry-run mode
+    const isLive = !!loopStatus.live;
+    const liveBtn = $('live-mode-toggle-btn');
+    const liveDesc = $('live-mode-desc');
+    if (isLive) {
+      liveBtn.textContent = 'Switch to Test Mode';
+      liveBtn.className = 'btn btn-danger-outline btn-sm';
+      liveDesc.textContent = 'Real Applications (LIVE) — Submits applications to real job sites';
+    } else {
+      liveBtn.textContent = 'Switch to Live';
+      liveBtn.className = 'btn btn-secondary btn-sm';
+      liveDesc.textContent = 'Test Drafts (Dry-run) — Fills out forms without submitting';
+    }
+
+    // Match Distribution Chart
+    renderMatchDistribution(stats.score_distribution || [], stats.skipped || 0);
+
+  } catch (err) {
+    console.error('loadHome error:', err);
+  }
+}
+
+function renderMatchDistribution(dist, skipped) {
+  const container = $('match-bars-container');
+  if (!dist.length) {
+    container.innerHTML = '<p style="color:var(--text-muted);font-size:0.88rem;">No rated jobs yet. Click "Start Finding Jobs" above to begin.</p>';
+    $('match-dist-note').textContent = '';
+    return;
+  }
+
   const maxCount = Math.max(1, ...dist.map(([, c]) => c));
-  const colorFor = (score) => score >= 7 ? 'var(--ok)' : score >= 5 ? 'var(--warn)' : 'var(--text-faint)';
-  $('score-dist').innerHTML = dist.length ? dist.map(([score, count]) => `
-    <div style="display:flex;align-items:center;gap:0.7rem;margin-bottom:0.5rem">
-      <span style="width:1.2rem;font-weight:700;font-size:0.8rem;text-align:right">${score}</span>
-      <div style="flex:1;height:10px;background:var(--surface-2);border-radius:999px;overflow:hidden">
-        <div style="width:100%;height:100%;background:${colorFor(score)};border-radius:999px;transform:scaleX(${(count/maxCount).toFixed(3)});transform-origin:left;transition:transform 0.4s ease"></div>
+  container.innerHTML = dist.map(([score, count]) => {
+    const color = score >= 8 ? 'var(--success)' : (score >= 6 ? 'var(--warning)' : '#94a3b8');
+    const pct = Math.min(100, Math.round((count / maxCount) * 100));
+    return `
+      <div class="match-bar-row">
+        <span class="match-bar-label">${score} / 10</span>
+        <div class="match-bar-track">
+          <div class="match-bar-fill" style="width:${pct}%;background:${color};"></div>
+        </div>
+        <span class="match-bar-val">${count} ${count === 1 ? 'job' : 'jobs'}</span>
       </div>
-      <span class="muted" style="width:3.5rem">${count} jobs</span>
-    </div>`).join('') : '<p class="muted">No scored jobs yet.</p>';
-  // Deliberately-skipped jobs (e.g. deprioritized as off-target) are a
-  // different axis from fit quality -- shown separately, never mixed into
-  // the 1-10 distribution above, so one doesn't visually swamp the other.
-  const skipped = s.skipped || 0;
-  $('score-dist-note').textContent = skipped
-    ? `+ ${skipped.toLocaleString()} deprioritized (off-target, not fit-scored) -- excluded above`
-    : '';
+    `;
+  }).join('');
+
+  if (skipped > 0) {
+    $('match-dist-note').textContent = `+ ${skipped.toLocaleString()} off-target job postings were filtered out automatically.`;
+  } else {
+    $('match-dist-note').textContent = '';
+  }
 }
+
+async function toggleMainSearch() {
+  if (_isAssistantRunning) {
+    await fetch('/api/loop/stop', { method: 'POST' });
+    await fetch('/api/pipeline/stop', { method: 'POST' });
+    showToast('Assistant paused.');
+  } else {
+    await fetch('/api/loop/start', { method: 'POST' });
+    showToast('Assistant started searching!');
+  }
+  await loadHome();
+}
+
+async function runQuickSearch() {
+  showToast('Starting a quick search & match pass...');
+  const res = await fetch('/api/pipeline/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      stages: ['discover', 'enrich', 'score', 'tailor', 'cover', 'pdf'],
+      stream: true,
+      workers: 4
+    })
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    alert(err.error || 'Could not start search.');
+  } else {
+    showToast('Quick search is running!');
+  }
+  await loadHome();
+}
+
+async function emergencyStop() {
+  await Promise.all([
+    fetch('/api/loop/stop', { method: 'POST' }).catch(() => {}),
+    fetch('/api/pipeline/stop', { method: 'POST' }).catch(() => {})
+  ]);
+  showToast('🛑 All searches and applications stopped immediately.');
+  await loadHome();
+}
+
+async function toggleAutoApplyMode() {
+  const btn = $('auto-apply-toggle-btn');
+  const isCurrentlyOn = btn.classList.contains('on');
+  const newEnabled = !isCurrentlyOn;
+  try {
+    await fetch('/api/auto-apply/toggle', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: newEnabled })
+    });
+    showToast(newEnabled ? 'Automatic applications enabled.' : 'Automatic applications disabled.');
+    await loadHome();
+  } catch (e) {
+    console.error('toggleAutoApply error:', e);
+  }
+}
+
+async function toggleLiveMode() {
+  const status = await (await fetch('/api/loop/status')).json();
+  const willBeLive = !status.live;
+  if (willBeLive) {
+    const confirmed = confirm('Turn on LIVE application submissions? JobPilot will submit real job applications to employer websites on your behalf.');
+    if (!confirmed) return;
+  }
+  await fetch('/api/loop/live', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ live: willBeLive })
+  });
+  showToast(willBeLive ? 'Switched to LIVE submissions.' : 'Switched to Test Drafts (Dry-run).');
+  await loadHome();
+}
+
+// ---------------------------------------------------------------------------
+// Activity Feed
+// ---------------------------------------------------------------------------
+let _lastActivityLog = '';
+async function loadActivity() {
+  try {
+    const d = await (await fetch('/api/activity')).json();
+    const feed = $('activity-log-box');
+    const logs = d.logs || [];
+    const newLog = logs.join('\n');
+    if (newLog !== _lastActivityLog) {
+      _lastActivityLog = newLog;
+      feed.textContent = newLog || 'Assistant is ready for new tasks.';
+      feed.scrollTop = feed.scrollHeight;
+
+      const hasActivity = logs.some(l => l.includes('---') || l.includes('LIVE') || l.includes('submit') || l.includes('stage'));
+      const statusBadge = $('activity-status-badge');
+      if (statusBadge) {
+        if (hasActivity) {
+          statusBadge.textContent = 'Active';
+          statusBadge.className = 'status-badge active';
+        } else {
+          statusBadge.textContent = 'Idle';
+          statusBadge.className = 'status-badge';
+        }
+      }
+    }
+  } catch (e) {
+    console.error('loadActivity error:', e);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Tab 2: My Jobs Logic
+// ---------------------------------------------------------------------------
+let _allLoadedJobs = [];
 
 async function useTargetLocationFilter() {
-  const loc = await (await fetch('/api/settings/location')).json();
-  const terms = [...(loc.location_accept || [])];
-  if (loc.remote_enabled) terms.push('Remote');
-  $('job-location').value = terms.join(', ');
-  loadJobs();
+  try {
+    const loc = await (await fetch('/api/settings/location')).json();
+    const terms = [...(loc.location_accept || [])];
+    if (loc.remote_enabled) terms.push('Remote');
+    $('job-location-input').value = terms.join(', ');
+    await loadJobs();
+  } catch (e) {
+    console.error('useTargetLocationFilter error:', e);
+  }
 }
 
 async function loadJobs() {
-  const minScore = $('job-min-score').value || 0;
-  const location = encodeURIComponent($('job-location').value || '');
-  const jobs = await (await fetch(`/api/jobs?min_score=${minScore}&location=${location}&limit=300`)).json();
-  $('jobs-body').innerHTML = jobs.map(j => {
-    const score = j.fit_score ?? '-';
-    const cls = j.fit_score >= 6 ? 'score-hi' : (j.fit_score >= 5 ? 'score-mid' : 'score-lo');
-    let status = 'discovered';
-    let statusCls = '';
-    if (j.applied_at) status = 'applied';
-    else if (j.apply_status === 'failed') {
-      // Show the real blocker, not just "failed" -- login_issue means a
-      // human can go log in and it'll likely work next attempt; captcha/
-      // unsafe_verification/expired are dead ends the loop can't fix itself.
-      status = j.apply_error ? `failed: ${j.apply_error}` : 'failed';
-      statusCls = (j.apply_error || '').includes('login') ? 'status-needs-login' : 'status-blocked';
+  const countText = $('jobs-count-text');
+  countText.textContent = 'Loading jobs...';
+
+  const minScore = $('job-score-filter').value || 0;
+  const location = encodeURIComponent($('job-location-input').value || '');
+
+  try {
+    const jobs = await (await fetch(`/api/jobs?min_score=${minScore}&location=${location}&limit=200`)).json();
+    _allLoadedJobs = jobs || [];
+    filterJobsClientSide();
+  } catch (e) {
+    console.error('loadJobs error:', e);
+    $('jobs-container').innerHTML = '<div class="empty-state"><div class="empty-title">Could not load jobs</div><div class="empty-desc">Check that the assistant is connected.</div></div>';
+  }
+}
+
+function filterJobsClientSide() {
+  const query = ($('job-search-input').value || '').toLowerCase().trim();
+  const container = $('jobs-container');
+  const countText = $('jobs-count-text');
+
+  let filtered = _allLoadedJobs;
+  if (query) {
+    filtered = filtered.filter(j =>
+      (j.title || '').toLowerCase().includes(query) ||
+      (j.site || '').toLowerCase().includes(query) ||
+      (j.location || '').toLowerCase().includes(query) ||
+      (j.score_reasoning || '').toLowerCase().includes(query)
+    );
+  }
+
+  countText.textContent = `Showing ${filtered.length} ${filtered.length === 1 ? 'job' : 'jobs'}`;
+
+  if (!filtered.length) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">🔍</div>
+        <div class="empty-title">No jobs found</div>
+        <div class="empty-desc">${_allLoadedJobs.length === 0 ? "You haven't searched for jobs yet. Click 'Start Finding Jobs' on the Home tab to begin discovering matches." : "No jobs match your current search words or filter."}</div>
+        ${_allLoadedJobs.length === 0 ? `<button class="btn btn-primary" onclick="switchTab('home'); toggleMainSearch();">🚀 Start Finding Jobs</button>` : `<button class="btn btn-secondary btn-sm" onclick="$('job-search-input').value=''; filterJobsClientSide();">Clear Search</button>`}
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = filtered.map(j => {
+    const score = j.fit_score != null ? j.fit_score : null;
+    let matchBadgeHtml = '<span class="match-badge match-fair">Unrated</span>';
+    if (score != null) {
+      if (score >= 8) matchBadgeHtml = `<span class="match-badge match-great">⭐ ${score}/10 Great Match</span>`;
+      else if (score >= 6) matchBadgeHtml = `<span class="match-badge match-good">👍 ${score}/10 Good Match</span>`;
+      else matchBadgeHtml = `<span class="match-badge match-fair">${score}/10 Fair Match</span>`;
     }
-    else if (j.apply_status) status = j.apply_status;
-    else if (j.cover_letter_path) status = 'cover letter ready';
-    else if (j.tailored_resume_path) status = 'tailored';
-    else if (j.fit_score != null) status = 'scored';
-    const fileLink = (kind, label) => ['txt', 'pdf', 'docx'].map(fmt =>
-      `<a class="action ghost" href="/api/jobs/file?kind=${kind}&format=${fmt}&url=${encodeURIComponent(j.url)}" target="_blank">${label} .${fmt}</a>`
-    ).join('');
-    const fileLinks = [
-      j.tailored_resume_path ? fileLink('resume', 'Resume') : '',
-      j.cover_letter_path ? fileLink('cover_letter', 'Cover letter') : '',
-    ].join('');
-    return `<tr>
-      <td class="score ${cls}">${score}</td>
-      <td><a href="${j.url}" target="_blank">${(j.title||'').slice(0,60)}</a></td>
-      <td>${j.site||''}</td>
-      <td class="${statusCls}">${status}</td>
-      <td>
-        ${fileLinks}
-        <button class="action ghost" onclick="markJob('${j.url.replace(/'/g,"\\'")}','applied')">Mark applied</button>
-        <button class="action ghost" onclick="markJob('${j.url.replace(/'/g,"\\'")}','failed')">Mark failed</button>
-      </td>
-    </tr>`;
-    loadStageProgress();
+
+    let statusHtml = '<span class="job-pill">Discovered</span>';
+    if (j.applied_at) {
+      statusHtml = '<span class="job-pill" style="background:var(--success-light);color:var(--success);">✅ Applied</span>';
+    } else if (j.apply_status === 'failed') {
+      const isLogin = (j.apply_error || '').includes('login');
+      statusHtml = `<span class="job-pill" style="background:var(--danger-light);color:var(--danger);">${isLogin ? '⚠️ Requires Login' : '⚠️ Application Issue'}</span>`;
+    } else if (j.tailored_resume_path && j.cover_letter_path) {
+      statusHtml = '<span class="job-pill" style="background:var(--primary-light);color:var(--primary);">📝 Ready to Apply</span>';
+    }
+
+    // Documents download
+    const encUrl = encodeURIComponent(j.url);
+    const resumeLinks = j.tailored_resume_path ? `
+      <span>Resume:</span>
+      <a class="doc-btn" href="/api/jobs/file?kind=resume&format=pdf&url=${encUrl}" target="_blank">PDF</a>
+      <a class="doc-btn" href="/api/jobs/file?kind=resume&format=docx&url=${encUrl}" target="_blank">DOCX</a>
+      <a class="doc-btn" href="/api/jobs/file?kind=resume&format=txt&url=${encUrl}" target="_blank">TXT</a>
+    ` : '';
+
+    const coverLinks = j.cover_letter_path ? `
+      <span style="margin-left:0.4rem;">Letter:</span>
+      <a class="doc-btn" href="/api/jobs/file?kind=cover_letter&format=pdf&url=${encUrl}" target="_blank">PDF</a>
+      <a class="doc-btn" href="/api/jobs/file?kind=cover_letter&format=docx&url=${encUrl}" target="_blank">DOCX</a>
+      <a class="doc-btn" href="/api/jobs/file?kind=cover_letter&format=txt&url=${encUrl}" target="_blank">TXT</a>
+    ` : '';
+
+    const jobUrl = j.application_url || j.url;
+    const safeUrl = j.url.replace(/'/g, "\\'");
+
+    return `
+      <div class="job-item">
+        <div class="job-top">
+          <div style="flex:1;min-width:0;">
+            <a href="${jobUrl}" target="_blank" rel="noopener" class="job-title-link">${escapeHtml(j.title || 'Untitled Job')}</a>
+            <div class="job-meta">
+              <span class="job-pill">${escapeHtml(j.site || 'Direct')}</span>
+              <span>📍 ${escapeHtml(j.location || 'Location Not Specified')}</span>
+              ${statusHtml}
+            </div>
+          </div>
+          <div>${matchBadgeHtml}</div>
+        </div>
+
+        ${j.score_reasoning ? `<div class="job-reason">${escapeHtml(j.score_reasoning)}</div>` : ''}
+
+        <div class="job-bottom">
+          <div class="job-docs">
+            ${resumeLinks || coverLinks ? resumeLinks + coverLinks : '<span style="color:var(--text-faint);">No custom documents prepared yet</span>'}
+          </div>
+          <div class="job-actions">
+            <button class="btn btn-secondary btn-sm" onclick="markJob('${safeUrl}', 'applied')">
+              ✅ Mark Applied
+            </button>
+            <button class="btn btn-secondary btn-sm" style="color:var(--text-muted);" onclick="markJob('${safeUrl}', 'failed')">
+              ❌ Not Interested
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
   }).join('');
 }
 
 async function markJob(url, status) {
-  await fetch('/api/jobs/mark', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({url, status})});
-  loadJobs();
+  try {
+    await fetch('/api/jobs/mark', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, status })
+    });
+    showToast(status === 'applied' ? 'Marked as applied!' : 'Job dismissed.');
+    await loadJobs();
+  } catch (e) {
+    console.error('markJob error:', e);
+  }
 }
 
-async function loadLoop() {
-  const s = await (await fetch('/api/loop/status')).json();
-  $('loop-badge').textContent = s.stalled ? 'stalled' : (s.running ? 'running' : 'stopped');
-  $('loop-badge').className = 'badge ' + (s.stalled ? 'stalled' : (s.running ? 'on' : 'off'));
-  $('live-badge').textContent = s.live ? 'LIVE' : 'dry-run';
-  $('live-badge').className = 'badge ' + (s.live ? 'live' : 'off');
-  $('live-toggle').textContent = s.live ? 'Disable live submit' : 'Enable live submit';
-  $('engine-badge').textContent = s.engine || 'claude';
-  $('engine-badge').className = 'badge ' + (s.engine === 'local' ? 'on' : 'off');
-  $('engine-select').value = s.engine || 'claude';
-  const fl = s.fastlane || {};
-  const flLine = 'fast lane: ' + (fl.state || 'unknown') + '  (pid ' + (fl.pid || '-') + ', last activity ' + (fl.last || '?') + ')';
-  $('loop-log').textContent = flLine + '\n' + '-'.repeat(flLine.length) + '\n' + (s.log_tail || '(no log yet)');
-}
-async function startLoop() { await fetch('/api/loop/start', {method:'POST'}); loadLoop(); }
-async function stopLoop() { await fetch('/api/loop/stop', {method:'POST'}); loadLoop(); }
-async function toggleLive() {
-  const badge = $('live-badge').textContent.trim();
-  const live = badge !== 'LIVE';
-  if (live && !confirm('Enable LIVE mode? The agent will submit real job applications.')) return;
-  await fetch('/api/loop/live', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({live})});
-  loadLoop();
-}
-async function saveEngine() {
-  const engine = $('engine-select').value;
-  await fetch('/api/loop/engine', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({engine})});
-  loadLoop();
+function escapeHtml(text) {
+  if (!text) return '';
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 }
 
-function updateLlmRows() {
-  const p = $('llm-provider').value;
-  $('row-local-url').style.display = p === 'local' ? 'flex' : 'none';
-  $('row-local-key').style.display = p === 'local' ? 'flex' : 'none';
-  $('row-gemini-key').style.display = p === 'gemini' ? 'flex' : 'none';
-  $('row-openai-key').style.display = p === 'openai' ? 'flex' : 'none';
-}
-$('llm-provider').addEventListener('change', updateLlmRows);
-
+// ---------------------------------------------------------------------------
+// Tab 3: Settings Logic
+// ---------------------------------------------------------------------------
 let _profileData = {};
-
-function _pget(path, def) {
-  return path.split('.').reduce((o, k) => (o && o[k] !== undefined) ? o[k] : undefined, _profileData) ?? def;
-}
-function _pset(path, val) {
-  const keys = path.split('.');
-  let cur = _profileData;
-  for (let i = 0; i < keys.length - 1; i++) { cur[keys[i]] = cur[keys[i]] || {}; cur = cur[keys[i]]; }
-  cur[keys[keys.length - 1]] = val;
-}
+let _acceptedLocations = [];
 
 const PROFILE_FIELDS = [
-  ['p-full_name', 'personal.full_name'], ['p-preferred_name', 'personal.preferred_name'],
-  ['p-email', 'personal.email'], ['p-phone', 'personal.phone'],
-  ['p-city', 'personal.city'], ['p-country', 'personal.country'],
+  ['p-full_name', 'personal.full_name'],
+  ['p-preferred_name', 'personal.preferred_name'],
+  ['p-email', 'personal.email'],
+  ['p-phone', 'personal.phone'],
+  ['p-city', 'personal.city'],
+  ['p-country', 'personal.country'],
   ['p-linkedin_url', 'personal.linkedin_url'],
   ['p-legally_authorized_to_work', 'work_authorization.legally_authorized_to_work'],
   ['p-require_sponsorship', 'work_authorization.require_sponsorship'],
@@ -1328,53 +2474,73 @@ const PROFILE_FIELDS = [
   ['p-education_level', 'experience.education_level'],
 ];
 
-async function loadProfiles() {
-  const p = await (await fetch('/api/profiles')).json();
-  const sel = $('profile-select');
-  sel.innerHTML = p.profiles.map(n => `<option value="${n}"${n === p.active ? ' selected' : ''}>${n}</option>`).join('');
-  $('profile-status').textContent = `Active: ${p.active}`;
+function _pget(path, def) {
+  return path.split('.').reduce((o, k) => (o && o[k] !== undefined) ? o[k] : undefined, _profileData) ?? def;
 }
 
-async function createProfile() {
-  const name = $('new-profile-name').value.trim();
-  if (!name) return;
-  const r = await (await fetch('/api/profiles/create', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name})})).json();
-  if (r.error) { $('profile-status').textContent = `Error: ${r.error}`; return; }
-  $('new-profile-name').value = '';
-  await loadProfiles();
-}
-
-async function switchProfile() {
-  const name = $('profile-select').value;
-  if (!name) return;
-  if (!confirm(`Switch active profile to "${name}"? The web UI will restart -- this takes a few seconds.`)) return;
-  await fetch('/api/profiles/switch', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name})});
-  $('profile-status').textContent = 'Restarting...';
-  await fetch('/api/restart', {method: 'POST'});
-  setTimeout(() => location.reload(), 3000);
+function _pset(path, val) {
+  const keys = path.split('.');
+  let cur = _profileData;
+  for (let i = 0; i < keys.length - 1; i++) {
+    cur[keys[i]] = cur[keys[i]] || {};
+    cur = cur[keys[i]];
+  }
+  cur[keys[keys.length - 1]] = val;
 }
 
 async function loadSettings() {
   await loadProfiles();
-  const llm = await (await fetch('/api/settings/llm')).json();
-  $('llm-provider').value = llm.provider === 'none' ? 'gemini' : llm.provider;
-  $('llm-url').value = llm.llm_url || '';
-  $('llm-model').value = llm.llm_model || '';
-  updateLlmRows();
-  $('llm-current').textContent = `Active: ${llm.provider} ${llm.llm_model ? '(' + llm.llm_model + ')' : ''}`;
 
-  _profileData = await (await fetch('/api/settings/profile')).json();
-  $('profile-json').value = JSON.stringify(_profileData, null, 2);
-  for (const [id, path] of PROFILE_FIELDS) { $(id).value = _pget(path, ''); }
+  // LLM Settings
+  try {
+    const llm = await (await fetch('/api/settings/llm')).json();
+    $('llm-provider').value = llm.provider === 'none' ? 'gemini' : llm.provider;
+    $('llm-url').value = llm.llm_url || '';
+    $('llm-model').value = llm.llm_model || '';
+    updateLlmRows();
+    $('llm-current').textContent = `Current AI: ${llm.provider} ${llm.llm_model ? '(' + llm.llm_model + ')' : ''}`;
+  } catch (e) {
+    console.error('loadSettings LLM error:', e);
+  }
 
-  const searches = await (await fetch('/api/settings/searches')).json();
-  $('searches-yaml').value = searches.yaml || '';
+  // Profile data
+  try {
+    _profileData = await (await fetch('/api/settings/profile')).json();
+    $('profile-json').value = JSON.stringify(_profileData, null, 2);
+    for (const [id, path] of PROFILE_FIELDS) {
+      const el = $(id);
+      if (el) el.value = _pget(path, '');
+    }
+  } catch (e) {
+    console.error('loadSettings profile error:', e);
+  }
 
-  const loc = await (await fetch('/api/settings/location')).json();
-  $('loc-primary').value = loc.primary_location || '';
-  $('loc-remote').value = loc.remote_enabled ? 'true' : 'false';
-  _acceptedLocations = loc.location_accept || [];
-  renderAcceptedLocations();
+  // Searches YAML
+  try {
+    const searches = await (await fetch('/api/settings/searches')).json();
+    $('searches-yaml').value = searches.yaml || '';
+  } catch (e) {
+    console.error('loadSettings searches error:', e);
+  }
+
+  // Location settings
+  try {
+    const loc = await (await fetch('/api/settings/location')).json();
+    $('loc-primary').value = loc.primary_location || '';
+    $('loc-remote').value = loc.remote_enabled ? 'true' : 'false';
+    _acceptedLocations = loc.location_accept || [];
+    renderAcceptedLocations();
+  } catch (e) {
+    console.error('loadSettings location error:', e);
+  }
+}
+
+function updateLlmRows() {
+  const p = $('llm-provider').value;
+  $('row-gemini-key').style.display = p === 'gemini' ? 'flex' : 'none';
+  $('row-openai-key').style.display = p === 'openai' ? 'flex' : 'none';
+  $('row-local-url').style.display = p === 'local' ? 'flex' : 'none';
+  $('row-local-key').style.display = p === 'local' ? 'flex' : 'none';
 }
 
 async function saveLlm() {
@@ -1386,72 +2552,120 @@ async function saveLlm() {
     gemini_key: $('gemini-key').value,
     openai_key: $('openai-key').value,
   };
-  await fetch('/api/settings/llm', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-  $('gemini-key').value = ''; $('openai-key').value = ''; $('llm-api-key').value = '';
-  loadSettings();
-  loadQueue();
-  loadActivity();
-  loadStageProgress();
-  loadAutoApplyStatus();
+  await fetch('/api/settings/llm', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  $('gemini-key').value = '';
+  $('openai-key').value = '';
+  $('llm-api-key').value = '';
+  showToast('✓ AI Assistant settings saved!');
+  await loadSettings();
+}
+
+async function saveProfileForm() {
+  for (const [id, path] of PROFILE_FIELDS) {
+    const el = $(id);
+    if (el) _pset(path, el.value);
+  }
+  await fetch('/api/settings/profile', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(_profileData)
+  });
+  $('profile-json').value = JSON.stringify(_profileData, null, 2);
+  showToast('✓ Profile details saved!');
 }
 
 async function saveProfile() {
   let data;
-  try { data = JSON.parse($('profile-json').value); } catch (e) { alert('Invalid JSON: ' + e.message); return; }
-  await fetch('/api/settings/profile', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)});
+  try {
+    data = JSON.parse($('profile-json').value);
+  } catch (e) {
+    alert('Invalid JSON format: ' + e.message);
+    return;
+  }
+  await fetch('/api/settings/profile', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
   _profileData = data;
-  alert('Profile saved.');
-}
-
-async function saveProfileForm() {
-  for (const [id, path] of PROFILE_FIELDS) { _pset(path, $(id).value); }
-  await fetch('/api/settings/profile', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(_profileData)});
-  $('profile-json').value = JSON.stringify(_profileData, null, 2);
-  alert('Profile saved.');
+  for (const [id, path] of PROFILE_FIELDS) {
+    const el = $(id);
+    if (el) el.value = _pget(path, '');
+  }
+  showToast('✓ Raw profile JSON saved!');
 }
 
 function toggleRawProfile() {
   const wrap = $('raw-profile-wrap');
-  const showing = wrap.style.display !== 'none';
-  wrap.style.display = showing ? 'none' : 'block';
-  $('raw-profile-toggle').textContent = showing ? 'Show raw JSON (advanced)' : 'Hide raw JSON';
+  const isHidden = wrap.style.display === 'none';
+  wrap.style.display = isHidden ? 'block' : 'none';
+  $('raw-profile-toggle').textContent = isHidden ? '▲ Hide Raw Profile JSON' : '⚙️ Advanced: View / Edit Full Profile Data (JSON)';
+}
+
+function toggleRawSearches() {
+  const wrap = $('raw-searches-wrap');
+  const isHidden = wrap.style.display === 'none';
+  wrap.style.display = isHidden ? 'block' : 'none';
+  $('raw-searches-toggle').textContent = isHidden ? '▲ Hide Raw Search Config' : '⚙️ Advanced: Search Queries & Keywords (YAML)';
 }
 
 async function saveSearches() {
-  await fetch('/api/settings/searches', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({yaml: $('searches-yaml').value})});
-  alert('Search config saved.');
+  await fetch('/api/settings/searches', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ yaml: $('searches-yaml').value })
+  });
+  showToast('✓ Search configuration saved!');
 }
 
-let _acceptedLocations = [];
-
 function renderAcceptedLocations() {
-  $('loc-accept-tags').innerHTML = _acceptedLocations.length ? _acceptedLocations.map((loc, i) =>
-    `<span class="badge off" style="cursor:pointer" onclick="removeAcceptedLocation(${i})" title="Click to remove">${loc}<svg class="icon" style="width:9px;height:9px;margin-left:0.3rem" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg></span>`
-  ).join('') : '<span class="muted">Remote-only (no cities/countries accepted for onsite roles)</span>';
+  const container = $('loc-accept-tags');
+  if (!_acceptedLocations.length) {
+    container.innerHTML = '<span style="font-size:0.8rem;color:var(--text-muted);">Remote-only (no specific onsite cities added)</span>';
+    return;
+  }
+  container.innerHTML = _acceptedLocations.map((loc, idx) => `
+    <span class="tag">
+      ${escapeHtml(loc)}
+      <span class="tag-close" onclick="removeAcceptedLocation(${idx})" title="Remove location">&times;</span>
+    </span>
+  `).join('');
 }
 
 function addAcceptedLocation() {
-  const val = $('loc-accept-input').value.trim();
-  if (val && !_acceptedLocations.includes(val)) { _acceptedLocations.push(val); renderAcceptedLocations(); }
-  $('loc-accept-input').value = '';
+  const input = $('loc-accept-input');
+  const val = input.value.trim();
+  if (val && !_acceptedLocations.includes(val)) {
+    _acceptedLocations.push(val);
+    renderAcceptedLocations();
+  }
+  input.value = '';
 }
 
-function removeAcceptedLocation(i) {
-  _acceptedLocations.splice(i, 1);
+function removeAcceptedLocation(idx) {
+  _acceptedLocations.splice(idx, 1);
   renderAcceptedLocations();
 }
 
 function applyLocationPreset(preset) {
-  if (preset === 'dubai') {
-    $('loc-primary').value = 'Dubai, United Arab Emirates';
+  if (preset === 'mycity') {
+    var _city = ($('p-city') && $('p-city').value.trim()) || '';
+    var _country = ($('p-country') && $('p-country').value.trim()) || '';
+    if (!_city) { showToast('Add your city in Profile & Resume first, then try this preset again.'); return; }
+    $('loc-primary').value = _country ? (_city + ', ' + _country) : _city;
     $('loc-remote').value = 'true';
-    _acceptedLocations = ['Dubai', 'UAE', 'United Arab Emirates'];
+    _acceptedLocations = [_city, _country].filter(Boolean);
   } else if (preset === 'remote') {
     $('loc-primary').value = '';
     $('loc-remote').value = 'true';
     _acceptedLocations = [];
   }
   renderAcceptedLocations();
+  showToast('Preset applied! Click "Save Location Preferences" to keep.');
 }
 
 async function saveLocation() {
@@ -1460,204 +2674,74 @@ async function saveLocation() {
     remote_enabled: $('loc-remote').value === 'true',
     location_accept: _acceptedLocations,
   };
-  await fetch('/api/settings/location', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  await fetch('/api/settings/location', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
   const searches = await (await fetch('/api/settings/searches')).json();
   $('searches-yaml').value = searches.yaml || '';
-  alert('Location saved. Takes effect on the next discover run.');
+  showToast('✓ Location preferences saved!');
 }
 
-loadStats();
-loadHealth();
-setInterval(loadStats, 15000);
-setInterval(() => { if ($('overview').classList.contains('active')) loadHealth(); }, 10000);
-setInterval(() => { if ($('agent').classList.contains('active')) loadLoop(); }, 5000);
-setInterval(() => { if ($('pipeline').classList.contains('active')) loadPipeline(); }, 5000);
+// Multi-User Profile Switcher
+async function loadProfiles() {
+  try {
+    const p = await (await fetch('/api/profiles')).json();
+    const sel = $('profile-select');
+    sel.innerHTML = (p.profiles || []).map(n => `<option value="${n}"${n === p.active ? ' selected' : ''}>${n}</option>`).join('');
+    $('profile-status').textContent = `Currently active: ${p.active}`;
+  } catch (e) {
+    console.error('loadProfiles error:', e);
+  }
+}
+
+async function createProfile() {
+  const name = $('new-profile-name').value.trim();
+  if (!name) return;
+  const res = await (await fetch('/api/profiles/create', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name })
+  })).json();
+  if (res.error) {
+    alert('Error: ' + res.error);
+    return;
+  }
+  $('new-profile-name').value = '';
+  showToast(`Profile "${name}" created!`);
+  await loadProfiles();
+}
+
+async function switchProfile() {
+  const name = $('profile-select').value;
+  if (!name) return;
+  if (!confirm(`Switch active user to "${name}"? The assistant will restart in a moment.`)) return;
+  await fetch('/api/profiles/switch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name })
+  });
+  $('profile-status').textContent = 'Restarting assistant...';
+  await fetch('/api/restart', { method: 'POST' });
+  setTimeout(() => location.reload(), 3000);
+}
 
 // ---------------------------------------------------------------------------
-// Auto-refresh
+// Auto-Refresh Loop
 // ---------------------------------------------------------------------------
-let _refreshInterval = null;
-function startAutoRefresh() {
-  if (_refreshInterval) clearInterval(_refreshInterval);
-  _refreshInterval = setInterval(() => {
-    loadStats();
-    loadQueue();
+loadHome();
+loadActivity();
+
+setInterval(() => {
+  const activeTab = document.querySelector('.tab-pane.active');
+  if (activeTab && activeTab.id === 'tab-home') {
+    loadHome();
     loadActivity();
-    loadStageProgress();
-    loadLoop();
-  }, 5000);
-}
-startAutoRefresh();
-
-// ---------------------------------------------------------------------------
-// Apply Queue
-// ---------------------------------------------------------------------------
-async function loadQueue() {
-  try {
-    const r = await fetch('/api/queue');
-    const d = await r.json();
-    $('queue-count').textContent = d.count;
-    const list = $('queue-list');
-    if (!d.jobs.length) {
-      list.innerHTML = '<p class="muted">No jobs ready to apply yet. Run the pipeline first.</p>';
-      return;
-    }
-    let html = '';
-    for (const j of d.jobs.slice(0, 50)) {
-      const scoreClass = j.fit_score >= 8 ? 'score-hi' : (j.fit_score >= 6 ? 'score-mid' : 'score-lo');
-      html += `<div class="job-row" style="padding:0.5rem;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">`;
-      html += `<div style="flex:1;min-width:0;">`;
-      html += `<div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(j.title || 'Untitled')}</div>`;
-      html += `<div class="muted" style="font-size:0.75rem;">${escapeHtml(j.site || '?')} | ${escapeHtml(j.location || '?')} | ${j.salary || 'Salary N/A'}</div>`;
-      html += `</div>`;
-      html += `<span class="score-pill ${scoreClass}" style="margin-left:0.5rem;">${j.fit_score}</span>`;
-      html += `</div>`;
-    }
-    if (d.jobs.length > 50) {
-      html += `<p class="muted" style="text-align:center;padding:0.5rem;">... and ${d.jobs.length - 50} more</p>`;
-    }
-    list.innerHTML = html;
-  } catch (e) {
-    console.error('loadQueue error:', e);
   }
-}
-
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
-
-// ---------------------------------------------------------------------------
-// Activity Feed
-// ---------------------------------------------------------------------------
-let _lastActivityLog = '';
-async function loadActivity() {
-  try {
-    const r = await fetch('/api/activity');
-    const d = await r.json();
-    const feed = $('activity-feed');
-    const newLog = d.logs.join('\n');
-    if (newLog !== _lastActivityLog) {
-      _lastActivityLog = newLog;
-      feed.textContent = newLog;
-      feed.scrollTop = feed.scrollHeight;
-      // Update status badge
-      const status = $('activity-status');
-      const hasActivity = d.logs.some(l => l.includes('---') || l.includes('LIVE') || l.includes('submit'));
-      if (hasActivity) {
-        status.textContent = 'active';
-        status.className = 'badge on';
-      } else {
-        status.textContent = 'idle';
-        status.className = 'badge off';
-      }
-    }
-  } catch (e) {
-    console.error('loadActivity error:', e);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Pipeline Stage Progress
-// ---------------------------------------------------------------------------
-async function loadStageProgress() {
-  try {
-    const r = await fetch('/api/stage-progress');
-    const d = await r.json();
-    // Update overview stat cards with progress bars
-    const cards = $('stat-cards');
-    if (!cards) return;
-
-    const total = d.total || 1;
-    const stages = [
-      { key: 'discovered', label: 'Discovered', color: '#60a5fa' },
-      { key: 'enriched', label: 'Enriched', color: '#34d399' },
-      { key: 'scored', label: 'Scored', color: '#a78bfa' },
-      { key: 'high_fit', label: 'High Fit', color: '#fbbf24' },
-      { key: 'tailored', label: 'Tailored', color: '#f87171' },
-      { key: 'cover_done', label: 'Cover', color: '#fb923c' },
-      { key: 'applied', label: 'Applied', color: '#10b981' },
-    ];
-
-    let html = '';
-    for (const s of stages) {
-      const count = d[s.key] || 0;
-      const pct = Math.round((count / total) * 100);
-      html += `<div class="card">`;
-      html += `<div class="num">${count}</div>`;
-      html += `<div class="label">${s.label}</div>`;
-      html += `<div style="width:100%;height:4px;background:var(--border);border-radius:2px;margin-top:0.5rem;">`;
-      html += `<div style="width:${pct}%;height:100%;background:${s.color};border-radius:2px;transition:width 0.5s;"></div>`;
-      html += `</div>`;
-      html += `</div>`;
-    }
-
-    // Add ready-to-apply badge
-    const ready = d.ready_to_apply || 0;
-    html += `<div class="card" style="border:2px solid #10b981;">`;
-    html += `<div class="num" style="color:#10b981;font-size:2.2rem;">${ready}</div>`;
-    html += `<div class="label">Ready to Apply</div>`;
-    html += `</div>`;
-
-    cards.innerHTML = html;
-  } catch (e) {
-    console.error('loadStageProgress error:', e);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Auto-Apply Toggle
-// ---------------------------------------------------------------------------
-async function toggleAutoApply() {
-  const btn = $('auto-apply-btn');
-  const status = $('auto-apply-status');
-  const currentlyEnabled = btn.textContent === 'Disable';
-  const newEnabled = !currentlyEnabled;
-
-  try {
-    await fetch('/api/auto-apply/toggle', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({enabled: newEnabled}),
-    });
-
-    if (newEnabled) {
-      btn.textContent = 'Disable';
-      btn.style.background = 'var(--ok)';
-      status.textContent = 'Auto-apply is ON. Jobs will be applied to automatically as they become ready.';
-      status.style.color = 'var(--ok)';
-    } else {
-      btn.textContent = 'Enable';
-      btn.style.background = 'var(--text-faint)';
-      status.textContent = 'Auto-apply is OFF. Jobs will queue until you manually apply.';
-      status.style.color = '';
-    }
-  } catch (e) {
-    console.error('toggleAutoApply error:', e);
-  }
-}
-
-async function loadAutoApplyStatus() {
-  try {
-    const r = await fetch('/api/auto-apply/status');
-    const d = await r.json();
-    const btn = $('auto-apply-btn');
-    const status = $('auto-apply-status');
-    if (d.enabled) {
-      btn.textContent = 'Disable';
-      btn.style.background = 'var(--ok)';
-      status.textContent = 'Auto-apply is ON. Jobs will be applied to automatically as they become ready.';
-      status.style.color = 'var(--ok)';
-    }
-  } catch (e) {
-    console.error('loadAutoApplyStatus error:', e);
-  }
-}
+}, 4000);
 
 </script>
 </body>
 </html>
 """
-    # ------------------------------------------------------------------
-

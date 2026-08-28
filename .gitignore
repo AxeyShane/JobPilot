@@ -49,3 +49,8 @@ Thumbs.db
 .jobpilot/
 # Internal dev coordination note (not part of the product)
 _DEV_CONTEXT.md
+# Local dev launcher / logs (not part of the product)
+run_web*.py
+jobpilot_web.log
+jobpilot_web.err
+jobpilot_verify.log
