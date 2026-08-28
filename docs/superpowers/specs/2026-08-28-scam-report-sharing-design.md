@@ -50,15 +50,23 @@ Deliberately conservative and stdlib-only, matching the rest of the gate's
 regex-based, no-new-dependency approach (no embeddings, no fuzzy-matching
 library):
 
-- **Primary signal — normalized long-substring containment.** Lowercase and
-  collapse whitespace on both the stored signature and the new posting, then
-  check whether a sufficiently long contiguous window of the signature (a
-  tunable minimum, starting around 40+ characters — long enough that it can
-  only really match a genuine reuse of the same pitch, not shared generic
-  phrasing) appears verbatim in the new text. This is intentionally stricter
-  than similarity scoring: it accepts some missed reposts (a scammer who
-  reworks their pitch each time slips through) in exchange for a low
-  false-positive rate, which matters more here since a match auto-blocks.
+	- **Primary signal — word-boundary / token-aware matching with a similarity
+  threshold.** Lowercase and normalize whitespace on both the stored signature
+  and the new posting, then match against the *tokens* of the signature, not
+  raw substrings.
+  - An exact phrase match is checked first with regex word boundaries
+    (`\b`), so a stored phrase never false-positives against a longer word
+    that merely contains it ("wireless" does not match "wire"; "coffee" does
+    not match "fee").
+  - Otherwise a token-level sliding-window comparison scores overlap: short
+    signatures (< 3 tokens) require an exact token-sequence match on word
+    boundaries; longer signatures use token overlap / sequence similarity
+    above a threshold (default 0.80). Plain substring containment is
+    deliberately NOT a signal — this repo hit a real substring-false-positive
+    bug in `validator.py`'s fabrication check, and the same trap is avoided
+    here.
+  - NET: stricter against false positives than character-substring matching,
+    while still catching near-identical reposts of the same pitch.
 - **Secondary signal — domain, corroborating only, never sufficient alone.**
   Aggregator-sourced postings (the source this feature targets most) often
   expose the aggregator's own apply-flow URL rather than the true poster's
@@ -72,7 +80,7 @@ library):
   the repo — same pattern as the existing `sites.yaml`/`employers.yaml`.
 - Per entry: company/entity name as claimed in the posting, any known
   domain(s), and the quoted scam-pitch excerpt (the same text used for the
-  substring-containment match above). Explicitly excluded: the individual
+  token-aware match above). Explicitly excluded: the individual
   "recruiter's" name, personal profile links, or any DM content beyond the
   pitch text itself — same reasoning as keeping the design-doc commit message
   generic.
@@ -100,7 +108,7 @@ library):
   possible `scam_reasons` category value: `user-reported`, using that spec's
   shared entry shape (`category`, `quoted`, `note`).
 - New local-only table `reported_signatures`: stores the reported posting text
-  signature + company/domain, for the substring-containment matching above.
+  signature + company/domain, for the token-aware matching above.
   Not synced automatically — feeds `--export` only.
 
 ## Explicitly out of scope for this spec
@@ -108,15 +116,14 @@ library):
 - Any live network sync, hosting, or accounts.
 - Automated PR submission.
 - Any personal/identifying information about the individual scammer.
-- Similarity/fuzzy matching beyond normalized substring containment (an
-  embeddings- or edit-distance-based matcher is a possible future upgrade, not
-  part of this design).
+- Embeddings- or edit-distance-based matching beyond the token-aware
+  similarity approach (a possible future upgrade, not part of this design).
 
 ## Testing
 
 - Local report action: verdict override + `scam_checked_at` stamp + signature
   stored, unit-testable the same way as the existing gate tests.
-- Substring-containment match against a reported signature: positive
+- Token-aware match against a reported signature: positive
   (near-identical repost, same long window present) and negative (unrelated
   posting, generic phrase overlap only, below the length threshold) cases —
   the negative case specifically proving generic-phrasing overlap alone does

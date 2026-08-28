@@ -284,7 +284,8 @@ def run_cover_letters(min_score: int = 6, limit: int = 0,
         "fit_score >= ? AND tailored_resume_path IS NOT NULL "
         "AND full_description IS NOT NULL "
         "AND (cover_letter_path IS NULL OR cover_letter_path = '') "
-        "AND COALESCE(cover_attempts, 0) < ?"
+        "AND COALESCE(cover_attempts, 0) < ? "
+        "AND (scam_verdict IS NULL OR scam_verdict != 'blocked')"
     )
     params: list = [min_score, MAX_ATTEMPTS]
     if urls:
