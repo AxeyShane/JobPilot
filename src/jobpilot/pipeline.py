@@ -15,14 +15,14 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from jobpilot.config import load_env, ensure_dirs
-from jobpilot.database import init_db, get_connection, get_stats
+from jobpilot.config import ensure_dirs, load_env
+from jobpilot.database import get_connection, get_stats, init_db
 
 log = logging.getLogger(__name__)
 console = Console()
@@ -114,7 +114,21 @@ def _run_score(workers: int = 1) -> dict:
     """Stage: LLM scoring — assign fit scores 1-10."""
     try:
         from jobpilot.scoring.scorer import run_scoring
-        run_scoring(workers=workers)
+        result = run_scoring(workers=workers)
+        # Stage completion hook: notify on high-fit fresh matches
+        try:
+            from jobpilot.notify import notify_event
+            scored_count = result.get("scored", 0) if isinstance(result, dict) else 0
+            if scored_count > 0:
+                dist = result.get("distribution", []) if isinstance(result, dict) else []
+                high_fit = sum(cnt for score, cnt in dist if score and score >= 7) if dist else scored_count
+                notify_event(
+                    "new_match",
+                    count=high_fit if high_fit > 0 else scored_count,
+                    scored=scored_count,
+                )
+        except Exception as notify_err:
+            log.debug("Score stage notification skipped: %s", notify_err)
         return {"status": "ok"}
     except Exception as e:
         log.error("Scoring failed: %s", e)
@@ -334,7 +348,7 @@ def _run_sequential(ordered: list[str], min_score: int, workers: int = 1,
         meta = STAGE_META[name]
         console.print(f"\n{'=' * 70}")
         console.print(f"  [bold]STAGE: {name}[/bold] — {meta['desc']}")
-        console.print(f"  Started: {datetime.now().strftime('%H:%M:%S')}")
+        console.print(f"  Started: {datetime.now(UTC).strftime('%H:%M:%S')}")
         console.print(f"{'=' * 70}")
 
         t0 = time.time()
@@ -384,7 +398,7 @@ def _run_streaming(ordered: list[str], min_score: int, workers: int = 1,
     stop_event = threading.Event()
     pipeline_start = time.time()
 
-    console.print(f"\n  [bold cyan]STREAMING MODE[/bold cyan] — stages run concurrently")
+    console.print("\n  [bold cyan]STREAMING MODE[/bold cyan] — stages run concurrently")
     console.print(f"  Poll interval: {_STREAM_POLL_INTERVAL}s\n")
 
     # Mark stages NOT in `ordered` as done so downstream doesn't wait for them
@@ -492,7 +506,7 @@ def run_pipeline(
         for name in ordered:
             meta = STAGE_META[name]
             console.print(f"    {name:<12s}  {meta['desc']}")
-        console.print(f"\n  No changes made.")
+        console.print("\n  No changes made.")
         return {"stages": [], "errors": {}, "elapsed": 0.0}
 
     # Execute
@@ -527,7 +541,7 @@ def run_pipeline(
 
     # Final DB stats
     final = get_stats()
-    console.print(f"\n  [bold]DB Final State:[/bold]")
+    console.print("\n  [bold]DB Final State:[/bold]")
     console.print(f"    Total jobs:     {final['total']}")
     console.print(f"    With desc:      {final['with_description']}")
     console.print(f"    Scored:         {final['scored']}")
@@ -536,5 +550,22 @@ def run_pipeline(
     console.print(f"    Ready to apply: {final['ready_to_apply']}")
     console.print(f"    Applied:        {final['applied']}")
     console.print(f"{'=' * 70}\n")
+
+    # Pipeline run summary notification hook
+    try:
+        from jobpilot.notify import notify_event
+        notify_event(
+            "run_summary",
+            elapsed=result.get("elapsed", 0.0),
+            total=final.get("total", 0),
+            scored=final.get("scored", 0),
+            tailored=final.get("tailored", 0),
+            ready=final.get("ready_to_apply", 0),
+            applied=final.get("applied", 0),
+            errors=result.get("errors", {}),
+            stages=result.get("stages", []),
+        )
+    except Exception as notify_err:
+        log.debug("Run summary notification skipped: %s", notify_err)
 
     return result

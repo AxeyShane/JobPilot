@@ -608,6 +608,66 @@ def create_app() -> Flask:
         )
         return jsonify({"ok": True, **get_location().get_json()})
 
+    # -- settings: notifications --
+
+    @app.get("/api/settings/notify")
+    @app.get("/api/settings/notifications")
+    def get_notify_settings():
+        notify_env = os.environ.get("JOBPILOT_NOTIFY", "1").strip().lower()
+        is_enabled = notify_env not in ("0", "false", "no", "off")
+        return jsonify({
+            "enabled": is_enabled,
+            "ntfy_topic": os.environ.get("JOBPILOT_NTFY_TOPIC", ""),
+            "apprise_url": os.environ.get("JOBPILOT_APPRISE_URL", ""),
+        })
+
+    @app.post("/api/settings/notify")
+    @app.post("/api/settings/notifications")
+    def set_notify_settings():
+        data = request.get_json(force=True)
+        enabled = bool(data.get("enabled", True))
+        ntfy_topic = (data.get("ntfy_topic") or "").strip()
+        apprise_url = (data.get("apprise_url") or "").strip()
+
+        updates: dict[str, str | None] = {
+            "JOBPILOT_NOTIFY": "1" if enabled else "0",
+            "JOBPILOT_NTFY_TOPIC": ntfy_topic if ntfy_topic else None,
+            "JOBPILOT_APPRISE_URL": apprise_url if apprise_url else None,
+        }
+        _upsert_env(updates)
+        for k, v in updates.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        cfg.load_env()
+        return jsonify({
+            "ok": True,
+            "enabled": enabled,
+            "ntfy_topic": ntfy_topic,
+            "apprise_url": apprise_url,
+        })
+
+    @app.post("/api/notify/test")
+    def post_notify_test():
+        try:
+            from jobpilot import notify
+            if hasattr(notify, "notify_event"):
+                try:
+                    res = notify.notify_event(
+                        "test", title="JobPilot Test", message="Test notification from JobPilot!"
+                    )
+                except TypeError:
+                    try:
+                        res = notify.notify_event("test")
+                    except TypeError:
+                        res = notify.notify_event()
+            else:
+                res = notify.notify("JobPilot Test", "Test notification from JobPilot!")
+            return jsonify({"ok": True, "result": res})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
     # -- profiles (multi-user) --
 
     @app.get("/api/profiles")
@@ -2214,6 +2274,53 @@ PAGE_HTML = r"""<!DOCTYPE html>
       </div>
     </div>
 
+    <!-- Notifications Setup -->
+    <div class="card" id="card-notifications">
+      <div class="card-header">
+        <span class="card-title">🔔 Notifications</span>
+      </div>
+      <p class="card-sub">Get alerts on your computer or phone when JobPilot finds fresh job matches.</p>
+
+      <div class="switches-grid" style="margin-bottom:1rem;">
+        <div class="switch-row">
+          <div class="switch-label-group">
+            <span class="switch-title">Enable notifications</span>
+            <span class="switch-desc" id="notify-enabled-desc">Desktop and mobile alerts for fresh job matches</span>
+          </div>
+          <button id="notify-toggle-btn" class="toggle-btn on" onclick="toggleNotifyEnabled()">Enabled</button>
+        </div>
+      </div>
+
+      <div class="form-grid">
+        <div class="form-group">
+          <label>ntfy Topic</label>
+          <input type="text" id="notify-ntfy-topic" placeholder="e.g. my-jobpilot-abc123">
+          <p class="card-sub" style="margin-top:0.25rem;">Keep this private — not shared with anyone.</p>
+        </div>
+        <div class="form-group">
+          <label>Apprise URL <span style="font-weight:normal;color:var(--text-muted);">(Optional)</span></label>
+          <input type="text" id="notify-apprise-url" placeholder="e.g. tgram://bottoken/chatid">
+          <p class="card-sub" style="margin-top:0.25rem;">Optional notification service for Telegram/email/etc.</p>
+        </div>
+      </div>
+
+      <div style="background:var(--bg, #f8fafc);border:1px solid var(--border);border-radius:var(--radius-md);padding:0.85rem 1rem;margin:1rem 0;font-size:0.85rem;color:var(--text-muted);line-height:1.45;">
+        📱 Get alerts on your phone with the free ntfy app (Android/iOS): subscribe to your topic in the app, then put the topic name here.
+      </div>
+
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:0.5rem;flex-wrap:wrap;gap:0.75rem;">
+        <div style="display:flex;gap:0.75rem;flex-wrap:wrap;">
+          <button class="btn btn-primary" onclick="saveNotifySettings()">
+            💾 Save Notification Settings
+          </button>
+          <button class="btn btn-secondary" onclick="sendTestNotification()" id="notify-test-btn">
+            📨 Send test notification
+          </button>
+        </div>
+        <span id="notify-current" style="font-size:0.82rem;color:var(--text-muted);"></span>
+      </div>
+    </div>
+
   </section>
 
 </main>
@@ -2974,6 +3081,20 @@ async function loadSettings() {
   } catch (e) {
     console.error('loadSettings location error:', e);
   }
+
+  // Notification settings
+  try {
+    const notif = await (await fetch('/api/settings/notify')).json();
+    _notifyEnabled = notif.enabled !== false;
+    $('notify-ntfy-topic').value = notif.ntfy_topic || '';
+    $('notify-apprise-url').value = notif.apprise_url || '';
+    updateNotifyToggleUI();
+    $('notify-current').textContent = _notifyEnabled
+      ? (notif.ntfy_topic ? `Topic: ${notif.ntfy_topic}` : 'Notifications enabled')
+      : 'Notifications disabled';
+  } catch (e) {
+    console.error('loadSettings notifications error:', e);
+  }
 }
 
 function updateLlmRows() {
@@ -3126,6 +3247,81 @@ async function saveLocation() {
   const searches = await (await fetch('/api/settings/searches')).json();
   $('searches-yaml').value = searches.yaml || '';
   showToast('✓ Location preferences saved!');
+}
+
+// Notification Settings Logic
+let _notifyEnabled = true;
+
+function updateNotifyToggleUI() {
+  const btn = $('notify-toggle-btn');
+  const desc = $('notify-enabled-desc');
+  if (!btn) return;
+  if (_notifyEnabled) {
+    btn.className = 'toggle-btn on';
+    btn.textContent = 'Enabled';
+    if (desc) desc.textContent = 'Desktop and mobile alerts for fresh job matches';
+  } else {
+    btn.className = 'toggle-btn';
+    btn.textContent = 'Disabled';
+    if (desc) desc.textContent = 'OFF — Notifications are silenced';
+  }
+}
+
+function toggleNotifyEnabled() {
+  _notifyEnabled = !_notifyEnabled;
+  updateNotifyToggleUI();
+}
+
+async function saveNotifySettings() {
+  const body = {
+    enabled: _notifyEnabled,
+    ntfy_topic: $('notify-ntfy-topic').value.trim(),
+    apprise_url: $('notify-apprise-url').value.trim(),
+  };
+  try {
+    const res = await (await fetch('/api/settings/notify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    })).json();
+    if (res.ok) {
+      showToast('✓ Notification settings saved!');
+      $('notify-current').textContent = _notifyEnabled
+        ? (body.ntfy_topic ? `Topic: ${body.ntfy_topic}` : 'Notifications enabled')
+        : 'Notifications disabled';
+    } else {
+      showToast('⚠️ Failed to save: ' + (res.error || 'Unknown error'));
+    }
+  } catch (e) {
+    showToast('⚠️ Error saving notification settings: ' + e.message);
+  }
+}
+
+async function sendTestNotification() {
+  const btn = $('notify-test-btn');
+  const origText = btn ? btn.textContent : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '⏳ Sending...';
+  }
+  try {
+    const res = await (await fetch('/api/notify/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    })).json();
+    if (res.ok) {
+      showToast('🔔 Test notification sent successfully!');
+    } else {
+      showToast('⚠️ Could not send test notification: ' + (res.error || 'Check notification backend'));
+    }
+  } catch (e) {
+    showToast('⚠️ Test notification error: ' + e.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = origText;
+    }
+  }
 }
 
 // Multi-User Profile Switcher
