@@ -374,12 +374,61 @@ def create_app() -> Flask:
         rows = conn.execute(
             f"""SELECT url, title, site, location, fit_score, score_reasoning,
                        tailored_resume_path, cover_letter_path, applied_at,
-                       apply_status, apply_error, application_url
+                       apply_status, apply_error, application_url,
+                       scam_verdict, scam_reasons, scam_checked_at
                 FROM jobs WHERE {where}
                 ORDER BY fit_score DESC, discovered_at DESC LIMIT ?""",
             params + [limit],
         ).fetchall()
         return jsonify([dict(r) for r in rows])
+
+    @app.get("/api/jobs/flagged")
+    @app.get("/api/scam/flagged")
+    def api_flagged_jobs():
+        limit = request.args.get("limit", default=100, type=int)
+        conn = get_connection()
+        rows = conn.execute(
+            """SELECT url, title, site, location, fit_score, score_reasoning,
+                      tailored_resume_path, cover_letter_path, applied_at,
+                      apply_status, apply_error, application_url,
+                      scam_verdict, scam_reasons, scam_checked_at
+               FROM jobs WHERE scam_verdict = 'blocked'
+               ORDER BY scam_checked_at DESC, discovered_at DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return jsonify([dict(r) for r in rows])
+
+    @app.post("/api/jobs/report-scam")
+    @app.post("/api/scam/report")
+    def api_report_scam():
+        data = request.get_json(force=True) or {}
+        url = data.get("url")
+        note = data.get("note", "")
+        if not url:
+            return jsonify({"error": "url is required"}), 400
+        try:
+            from jobpilot.scam_report import record_report
+            res = record_report(url, note=note)
+            return jsonify({"ok": True, "report": res})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    @app.post("/api/jobs/clear-scam")
+    @app.post("/api/scam/clear")
+    def api_clear_scam():
+        data = request.get_json(force=True) or {}
+        url = data.get("url")
+        if not url:
+            return jsonify({"error": "url is required"}), 400
+        from datetime import datetime, timezone
+        conn = get_connection()
+        now_iso = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            "UPDATE jobs SET scam_verdict = 'clear', scam_checked_at = ? WHERE url = ?",
+            (now_iso, url),
+        )
+        conn.commit()
+        return jsonify({"ok": True})
 
     @app.post("/api/jobs/mark")
     def api_mark_job():
@@ -704,6 +753,9 @@ def create_app() -> Flask:
             "applied": conn.execute("SELECT COUNT(*) FROM jobs WHERE applied_at IS NOT NULL").fetchone()[0],
             "failed": conn.execute(
                 "SELECT COUNT(*) FROM jobs WHERE apply_status = 'failed'"
+            ).fetchone()[0],
+            "scam_blocked": conn.execute(
+                "SELECT COUNT(*) FROM jobs WHERE scam_verdict = 'blocked'"
             ).fetchone()[0],
             # Mirrors api_queue()/launcher.acquire_job() eligibility. There is no
             # failed_at column -- failure lives in apply_status/apply_attempts.
@@ -1426,6 +1478,60 @@ PAGE_HTML = r"""<!DOCTYPE html>
     flex-wrap: wrap;
   }
 
+  /* Safety & Scam Warnings */
+  .scam-warning-box {
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-left: 4px solid var(--danger);
+    border-radius: var(--radius-sm);
+    padding: 0.65rem 0.9rem;
+    font-size: 0.84rem;
+    color: #991b1b;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+  .scam-warning-title {
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+  .scam-warning-reason {
+    font-weight: 500;
+  }
+  .scam-warning-detail {
+    font-size: 0.8rem;
+    color: #7f1d1d;
+    background: #ffffff;
+    border: 1px solid #fee2e2;
+    padding: 0.4rem 0.6rem;
+    border-radius: 4px;
+    margin-top: 0.2rem;
+    line-height: 1.4;
+  }
+  .scam-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    background: #fee2e2;
+    color: #991b1b;
+    border: 1px solid #fca5a5;
+    padding: 0.2rem 0.6rem;
+    border-radius: var(--radius-full);
+    font-size: 0.78rem;
+    font-weight: 700;
+  }
+  .nav-count-badge {
+    background: var(--danger);
+    color: #ffffff;
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 0.1rem 0.45rem;
+    border-radius: 10px;
+    margin-left: 0.25rem;
+  }
+
   /* Empty States */
   .empty-state {
     text-align: center;
@@ -1600,6 +1706,7 @@ PAGE_HTML = r"""<!DOCTYPE html>
     <nav>
       <button data-tab="home" class="active" onclick="switchTab('home')">🏠 Home</button>
       <button data-tab="jobs" onclick="switchTab('jobs')">💼 My Jobs</button>
+      <button data-tab="safety" onclick="switchTab('safety')">🛡️ Safety</button>
       <button data-tab="settings" onclick="switchTab('settings')">⚙️ Settings</button>
     </nav>
 
@@ -1792,7 +1899,36 @@ PAGE_HTML = r"""<!DOCTYPE html>
   </section>
 
 
-  <!-- ================= TAB 3: SETTINGS ================= -->
+  <!-- ================= TAB 3: SAFETY / FLAGGED JOBS ================= -->
+  <section id="tab-safety" class="tab-pane">
+
+    <!-- Safety Intro Card -->
+    <div class="card" style="border-left: 4px solid var(--danger);">
+      <div class="card-header">
+        <span class="card-title">🛡️ Scam Screening & Flagged Jobs</span>
+        <button class="btn btn-secondary btn-sm" onclick="loadSafetyJobs()">
+          🔄 Refresh
+        </button>
+      </div>
+      <p class="card-sub" style="margin-bottom:0.25rem;">
+        JobPilot screens job listings for suspicious fee demands, fake recruiter patterns, and off-platform pivots. Flagged jobs are blocked from automatic applications.
+      </p>
+    </div>
+
+    <!-- Safety Job Count Summary -->
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem;padding:0 0.25rem;">
+      <span id="safety-count-text" style="font-size:0.9rem;font-weight:600;color:var(--text-muted);">Loading flagged jobs...</span>
+    </div>
+
+    <!-- Flagged Jobs List Container -->
+    <div id="safety-jobs-container" class="job-list">
+      <!-- Flagged jobs will be rendered here dynamically -->
+    </div>
+
+  </section>
+
+
+  <!-- ================= TAB 4: SETTINGS ================= -->
   <section id="tab-settings" class="tab-pane">
 
     <!-- Multi-User Profiles -->
@@ -2060,6 +2196,7 @@ function switchTab(tabName) {
   });
   if (tabName === 'home') loadHome();
   if (tabName === 'jobs') loadJobs();
+  if (tabName === 'safety') loadSafetyJobs();
   if (tabName === 'settings') loadSettings();
 }
 
@@ -2150,6 +2287,15 @@ async function loadHome() {
 
     // Match Distribution Chart
     renderMatchDistribution(stats.score_distribution || [], stats.skipped || 0);
+
+    // Update Safety tab badge if any jobs blocked
+    const safetyBtn = document.querySelector('nav button[data-tab="safety"]');
+    if (safetyBtn) {
+      const blockedCount = stageProg.scam_blocked || 0;
+      safetyBtn.innerHTML = blockedCount > 0
+        ? `🛡️ Safety <span class="nav-count-badge">${blockedCount}</span>`
+        : `🛡️ Safety`;
+    }
 
   } catch (err) {
     console.error('loadHome error:', err);
@@ -2326,6 +2472,50 @@ async function loadJobs() {
   }
 }
 
+function parseScamReasons(scamReasons) {
+  if (!scamReasons) return [];
+  if (Array.isArray(scamReasons)) return scamReasons;
+  try {
+    const parsed = JSON.parse(scamReasons);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function getFriendlyReasonText(reasonObj) {
+  if (!reasonObj) return 'Suspicious posting details detected';
+  if (reasonObj.note) return reasonObj.note;
+  const category = reasonObj.category || '';
+  const quotes = reasonObj.quoted ? ` ("${reasonObj.quoted.length > 90 ? reasonObj.quoted.substring(0, 87) + '...' : reasonObj.quoted}")` : '';
+
+  if (category === 'payment_fee') {
+    return 'Requests upfront payment, application fees, or equipment purchases' + quotes;
+  }
+  if (category === 'bank_account_processing') {
+    return 'Requests personal bank account for payment processing' + quotes;
+  }
+  if (category === 'premature_sensitive_info') {
+    return 'Requests sensitive ID or bank details before interview' + quotes;
+  }
+  if (category === 'off_platform_pivot') {
+    return 'Directs conversation to unverified off-platform messaging' + quotes;
+  }
+  if (category === 'too_good_to_be_true') {
+    return 'Unrealistic hiring guarantees or vague employer details' + quotes;
+  }
+  if (category === 'reported_signature_match') {
+    return 'Matches a previously reported scam posting' + quotes;
+  }
+  if (category === 'user-reported') {
+    return (reasonObj.note || 'Reported by user as a scam') + quotes;
+  }
+  if (category === 'llm_suspicious') {
+    return (reasonObj.reason || reasonObj.quoted || 'Flagged as suspicious during safety review') + quotes;
+  }
+  return (reasonObj.reason || reasonObj.quoted || 'Suspicious posting details detected') + quotes;
+}
+
 function filterJobsClientSide() {
   const query = ($('job-search-input').value || '').toLowerCase().trim();
   const container = $('jobs-container');
@@ -2364,8 +2554,14 @@ function filterJobsClientSide() {
       else matchBadgeHtml = `<span class="match-badge match-fair">${score}/10 Fair Match</span>`;
     }
 
+    const isBlocked = j.scam_verdict === 'blocked';
+    const reasons = parseScamReasons(j.scam_reasons);
+    const firstReasonText = reasons.length > 0 ? getFriendlyReasonText(reasons[0]) : 'Flagged as suspicious during screening';
+
     let statusHtml = '<span class="job-pill">Discovered</span>';
-    if (j.applied_at) {
+    if (isBlocked) {
+      statusHtml = '<span class="job-pill" style="background:#fee2e2;color:#991b1b;font-weight:700;">⚠️ Blocked (Scam Warning)</span>';
+    } else if (j.applied_at) {
       statusHtml = '<span class="job-pill" style="background:var(--success-light);color:var(--success);">✅ Applied</span>';
     } else if (j.apply_status === 'failed') {
       const isLogin = (j.apply_error || '').includes('login');
@@ -2373,6 +2569,13 @@ function filterJobsClientSide() {
     } else if (j.tailored_resume_path && j.cover_letter_path) {
       statusHtml = '<span class="job-pill" style="background:var(--primary-light);color:var(--primary);">📝 Ready to Apply</span>';
     }
+
+    // Scam warning banner on card
+    const scamWarningBanner = isBlocked ? `
+      <div class="scam-warning-box">
+        <div class="scam-warning-title">⚠️ Possible scam: <span class="scam-warning-reason">${escapeHtml(firstReasonText)}</span></div>
+      </div>
+    ` : '';
 
     // Documents download
     const encUrl = encodeURIComponent(j.url);
@@ -2392,12 +2595,38 @@ function filterJobsClientSide() {
 
     const jobUrl = j.application_url || j.url;
     const safeUrl = j.url.replace(/'/g, "\\'");
+    const safeTitle = (j.title || 'Untitled Job').replace(/'/g, "\\'");
+
+    // Actions
+    let actionButtons = '';
+    if (isBlocked) {
+      actionButtons = `
+        <button class="btn btn-secondary btn-sm" style="color:var(--success);font-weight:600;" onclick="clearScamFlag('${safeUrl}')">
+          ✅ Clear Flag
+        </button>
+        <button class="btn btn-secondary btn-sm" style="color:var(--danger);" onclick="reportScamPrompt('${safeUrl}', '${escapeHtml(safeTitle)}')">
+          🚩 Report as Scam
+        </button>
+      `;
+    } else {
+      actionButtons = `
+        <button class="btn btn-secondary btn-sm" onclick="markJob('${safeUrl}', 'applied')">
+          ✅ Mark Applied
+        </button>
+        <button class="btn btn-secondary btn-sm" style="color:var(--text-muted);" onclick="markJob('${safeUrl}', 'failed')">
+          ❌ Not Interested
+        </button>
+        <button class="btn btn-secondary btn-sm" style="color:var(--text-muted);" title="Report suspicious posting" onclick="reportScamPrompt('${safeUrl}', '${escapeHtml(safeTitle)}')">
+          🚩 Report Scam
+        </button>
+      `;
+    }
 
     return `
-      <div class="job-item">
+      <div class="job-item"${isBlocked ? ' style="border-color:#fecaca;"' : ''}>
         <div class="job-top">
           <div style="flex:1;min-width:0;">
-            <a href="${jobUrl}" target="_blank" rel="noopener" class="job-title-link">${escapeHtml(j.title || 'Untitled Job')}</a>
+            <a href="${jobUrl}" target="_blank" rel="noopener" class="job-title-link"${isBlocked ? ' style="color:#b91c1c;"' : ''}>${escapeHtml(j.title || 'Untitled Job')}</a>
             <div class="job-meta">
               <span class="job-pill">${escapeHtml(j.site || 'Direct')}</span>
               <span>📍 ${escapeHtml(j.location || 'Location Not Specified')}</span>
@@ -2407,6 +2636,8 @@ function filterJobsClientSide() {
           <div>${matchBadgeHtml}</div>
         </div>
 
+        ${scamWarningBanner}
+
         ${j.score_reasoning ? `<div class="job-reason">${escapeHtml(j.score_reasoning)}</div>` : ''}
 
         <div class="job-bottom">
@@ -2414,12 +2645,7 @@ function filterJobsClientSide() {
             ${resumeLinks || coverLinks ? resumeLinks + coverLinks : '<span style="color:var(--text-faint);">No custom documents prepared yet</span>'}
           </div>
           <div class="job-actions">
-            <button class="btn btn-secondary btn-sm" onclick="markJob('${safeUrl}', 'applied')">
-              ✅ Mark Applied
-            </button>
-            <button class="btn btn-secondary btn-sm" style="color:var(--text-muted);" onclick="markJob('${safeUrl}', 'failed')">
-              ❌ Not Interested
-            </button>
+            ${actionButtons}
           </div>
         </div>
       </div>
@@ -2439,6 +2665,161 @@ async function markJob(url, status) {
   } catch (e) {
     console.error('markJob error:', e);
   }
+}
+
+async function reportScamPrompt(url, title) {
+  const note = prompt(`Report "${title || 'this job'}" as a scam?\n\nThis will immediately block the job and remember its signature.\n\nOptional: Add a brief note (e.g. asked for fee, bank account, fake recruiter):`, '');
+  if (note === null) return;
+  try {
+    const res = await fetch('/api/jobs/report-scam', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, note: note.trim() })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showToast('Reported as scam and blocked.');
+      await loadJobs();
+      if ($('tab-safety') && $('tab-safety').classList.contains('active')) {
+        await loadSafetyJobs();
+      }
+      loadHome();
+    } else {
+      alert('Could not report job: ' + (data.error || 'Unknown error'));
+    }
+  } catch (e) {
+    console.error('reportScam error:', e);
+    alert('Failed to report scam.');
+  }
+}
+
+async function clearScamFlag(url) {
+  if (!confirm('Mark this job posting as safe and clear the scam flag? It will become eligible for applications if match criteria are met.')) {
+    return;
+  }
+  try {
+    const res = await fetch('/api/jobs/clear-scam', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showToast('Flag cleared. Job marked as safe.');
+      await loadJobs();
+      if ($('tab-safety') && $('tab-safety').classList.contains('active')) {
+        await loadSafetyJobs();
+      }
+      loadHome();
+    } else {
+      alert('Could not clear flag: ' + (data.error || 'Unknown error'));
+    }
+  } catch (e) {
+    console.error('clearScamFlag error:', e);
+    alert('Failed to clear flag.');
+  }
+}
+
+let _allSafetyJobs = [];
+
+async function loadSafetyJobs() {
+  const countText = $('safety-count-text');
+  if (countText) countText.textContent = 'Loading flagged jobs...';
+  const container = $('safety-jobs-container');
+  if (!container) return;
+
+  try {
+    const res = await fetch('/api/jobs/flagged');
+    const jobs = await res.json();
+    _allSafetyJobs = jobs || [];
+    renderSafetyJobs();
+  } catch (e) {
+    console.error('loadSafetyJobs error:', e);
+    if (container) {
+      container.innerHTML = '<div class="empty-state"><div class="empty-title">Could not load flagged jobs</div><div class="empty-desc">Check that the assistant is connected.</div></div>';
+    }
+  }
+}
+
+function renderSafetyJobs() {
+  const container = $('safety-jobs-container');
+  const countText = $('safety-count-text');
+  if (!container) return;
+
+  const jobs = _allSafetyJobs;
+  if (countText) {
+    countText.textContent = `Found ${jobs.length} flagged ${jobs.length === 1 ? 'posting' : 'postings'}`;
+  }
+
+  if (!jobs.length) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">🛡️</div>
+        <div class="empty-title">No flagged postings</div>
+        <div class="empty-desc">All discovered job postings look safe and passed scam screening. When suspicious postings or fee demands are detected, they will appear here for review.</div>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = jobs.map(j => {
+    const reasons = parseScamReasons(j.scam_reasons);
+    const firstReasonText = reasons.length > 0 ? getFriendlyReasonText(reasons[0]) : 'Flagged as suspicious during screening';
+
+    const reasonsListHtml = reasons.map(r => {
+      const friendlyCat = getFriendlyReasonText(r);
+      const quoteHtml = r.quoted ? `<div style="margin-top:0.25rem;font-style:italic;color:#881337;">Excerpt: "${escapeHtml(r.quoted)}"</div>` : '';
+      return `<div class="scam-warning-detail"><strong>${escapeHtml(friendlyCat)}</strong>${quoteHtml}</div>`;
+    }).join('');
+
+    const score = j.fit_score != null ? j.fit_score : null;
+    let matchBadgeHtml = '';
+    if (score != null) {
+      matchBadgeHtml = `<span class="match-badge match-fair">Match: ${score}/10</span>`;
+    }
+
+    const jobUrl = j.application_url || j.url;
+    const safeUrl = j.url.replace(/'/g, "\\'");
+    const safeTitle = (j.title || 'Untitled Job').replace(/'/g, "\\'");
+
+    return `
+      <div class="job-item" style="border-color:#fecaca;">
+        <div class="job-top">
+          <div style="flex:1;min-width:0;">
+            <a href="${jobUrl}" target="_blank" rel="noopener" class="job-title-link" style="color:#b91c1c;">${escapeHtml(j.title || 'Untitled Job')}</a>
+            <div class="job-meta">
+              <span class="job-pill" style="background:#fee2e2;color:#991b1b;font-weight:700;">⚠️ Blocked</span>
+              <span class="job-pill">${escapeHtml(j.site || 'Direct')}</span>
+              <span>📍 ${escapeHtml(j.location || 'Location Not Specified')}</span>
+              ${j.scam_checked_at ? `<span>Checked: ${escapeHtml(j.scam_checked_at.slice(0, 10))}</span>` : ''}
+            </div>
+          </div>
+          <div>${matchBadgeHtml}</div>
+        </div>
+
+        <div class="scam-warning-box">
+          <div class="scam-warning-title">⚠️ Possible scam: <span class="scam-warning-reason">${escapeHtml(firstReasonText)}</span></div>
+          ${reasonsListHtml}
+        </div>
+
+        ${j.score_reasoning ? `<div class="job-reason">${escapeHtml(j.score_reasoning)}</div>` : ''}
+
+        <div class="job-bottom">
+          <div style="font-size:0.8rem;color:var(--text-muted);">
+            Blocked from auto-apply. Review details or clear flag if this posting is legitimate.
+          </div>
+          <div class="job-actions">
+            <button class="btn btn-secondary btn-sm" style="color:var(--danger);" onclick="reportScamPrompt('${safeUrl}', '${escapeHtml(safeTitle)}')">
+              🚩 Report as Scam
+            </button>
+            <button class="btn btn-secondary btn-sm" style="color:var(--success);font-weight:600;" onclick="clearScamFlag('${safeUrl}')">
+              ✅ Clear Flag (Mark Safe)
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
 }
 
 function escapeHtml(text) {
