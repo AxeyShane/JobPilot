@@ -27,6 +27,7 @@ from jobpilot.config import DB_PATH
 from jobpilot.database import get_connection, init_db, ensure_columns
 from jobpilot.llm import get_enrich_client
 from jobpilot.markdown_extract import html_to_fit_markdown
+from jobpilot.quality import sanitize_posting
 
 log = logging.getLogger(__name__)
 
@@ -587,6 +588,25 @@ def scrape_detail_page(page, url: str) -> dict:
     return result
 
 
+def _sanitize_and_log(url: str, raw_description: str | None) -> str | None:
+    """Run a scraped job description through sanitize_posting() before it is
+    ever persisted. full_description is untrusted external text (arbitrary
+    employer/ATS sites) that flows straight into the scoring, tailoring, and
+    cover-letter LLM prompts (scorer.py / tailor.py / cover_letter.py) --
+    this is the single write site, so sanitizing here covers all three
+    without needing to touch each call site individually.
+    """
+    if not raw_description:
+        return raw_description
+    result = sanitize_posting(raw_description)
+    if result["flags"]:
+        log.warning(
+            "full_description sanitized for %s: flags=%s (%d item(s) removed)",
+            url, result["flags"], len(result["removed"]),
+        )
+    return result["cleaned"]
+
+
 def scrape_site_batch(
     conn: sqlite3.Connection | None,
     site: str,
@@ -644,10 +664,11 @@ def scrape_site_batch(
 
                 if status in ("ok", "partial"):
                     stats[status] += 1
+                    cleaned_desc = _sanitize_and_log(url, result.get("full_description"))
                     conn.execute(
                         "UPDATE jobs SET full_description = ?, application_url = ?, "
                         "detail_scraped_at = ?, detail_error = NULL WHERE url = ?",
-                        (result.get("full_description"), result.get("application_url"), now, url),
+                        (cleaned_desc, result.get("application_url"), now, url),
                     )
                 else:
                     stats["error"] += 1

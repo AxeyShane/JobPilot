@@ -20,6 +20,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import shutil
 import time
 from pathlib import Path
@@ -83,6 +84,13 @@ MAX_TURNS = int(os.environ.get("APPLY_MAX_TURNS", "90"))
 # burned 38 of its 40 turns on identical browser_click calls with a single
 # snapshot, never re-reading the page to find out why the click failed.
 _REPEAT_LIMIT = 3
+# Bounded termination for dry-run enforcement: after this many blocked
+# submit-like attempts, stop trusting the model to wrap up on its own and
+# force a clean dry-run completion. Without this, a model that ignores the
+# "conclude now" instruction fed back on a block could burn most of the
+# MAX_TURNS budget retrying the same blocked action before the existing
+# max-turns fallback eventually catches it.
+_DRY_RUN_BLOCK_LIMIT = int(os.environ.get("APPLY_DRY_RUN_BLOCK_LIMIT", "3"))
 # P1 bring-up escalation: Chrome CDP readiness + MCP spawn retries. The 60-failure
 # "unhandled errors in a TaskGroup (Connection closed)" class was the MCP stdio
 # server dying at startup -- because Chrome's CDP port wasn't listening yet and/or
@@ -135,6 +143,81 @@ _ALLOWED_TOOLS = {
     "browser_select_option", "browser_file_upload", "browser_press_key",
     "browser_wait_for", "browser_find", "browser_tabs", "browser_close",
 }
+
+
+# --- Dry-run enforcement -----------------------------------------------
+#
+# prompt.py's dry-run mode is a sentence in the prompt ("do NOT click
+# Submit"). That is not a technical guarantee -- nothing stopped the actual
+# click from reaching the browser if the model ignored it, and the rest of
+# the same prompt tells the agent to "Act decisively... Submit the
+# application" across up to MAX_TURNS turns. This is the real backstop:
+# when dry_run is on, a tool call that looks like the final submit action
+# is intercepted in _run_agent_turns BEFORE session.call_tool() is ever
+# invoked, so the real MCP call -- and therefore the real browser click --
+# never fires, regardless of what the model decides to do.
+#
+# This only covers engine=local (this file's own tool-calling loop).
+# engine=claude (apply/launcher.py) spawns the Claude Code CLI as a
+# subprocess that owns its own internal tool loop and is not interceptable
+# this way -- dry-run there remains prompt-only. Per CLAUDE.md, engine=claude
+# is already discouraged (275 weekly-limit failures, 141 Playwright-load
+# failures logged) and every real scheduled run (scripts/agent_loop.ps1, via
+# --fast) auto-forces engine=local regardless of the configured engine flag,
+# so this covers the path that actually matters in practice.
+
+# Keys that can submit a focused form. Playwright MCP's browser_press_key
+# schema gives no element context, so this is intentionally coarse: block
+# every Enter/Return press in dry-run mode rather than trying to guess
+# what's focused.
+_SUBMIT_KEYS = {"Enter", "Return"}
+
+# Strong signal: these phrases essentially never appear on a mid-wizard
+# progression control, only on the terminal action.
+_STRONG_SUBMIT_RE = re.compile(
+    r"\bsubmit\b|\bsend\s+application\b|\bfinish\s+application\b|"
+    r"\bcomplete\s+application\b",
+    re.IGNORECASE,
+)
+# Navigational / non-terminal controls in a multi-step wizard. Checked
+# before the weak pattern below so "Next" / "Continue to step 2" / "Save
+# draft" don't block real ATS forms -- these are documented to take 58-73
+# distinct clicks across multiple pages before reaching a real submit.
+_NAV_RE = re.compile(
+    r"\b(next|continue|back|previous|save\s+draft|search|filters?|browse|"
+    r"add\s+(?:another|attachment)|step\s*\d+|page\s*\d+)\b",
+    re.IGNORECASE,
+)
+# Weak signal: bare "apply" is ambiguous elsewhere in job-board UIs (e.g.
+# "Apply filters"), so it only blocks when the nav pattern above didn't
+# already clear it.
+_WEAK_SUBMIT_RE = re.compile(r"\bapply(?:\s*now)?\b", re.IGNORECASE)
+
+
+def _looks_like_submit(tool_name: str, args: dict) -> bool:
+    """Heuristic: would this tool call actually submit the application?
+
+    Deliberately conservative and best-effort -- a defense-in-depth
+    backstop on top of (not a replacement for) the prompt-level dry-run
+    instruction in prompt.py. It can both under-block (a final action
+    worded as bare "Confirm"/"Done" won't be caught) and over-block (a
+    genuinely mid-wizard "Submit references" step would be), so it is not
+    a proof of safety, only a substantial technical narrowing of the gap.
+    """
+    if tool_name == "browser_press_key":
+        return str(args.get("key", "")) in _SUBMIT_KEYS
+
+    if tool_name != "browser_click":
+        return False
+
+    element = str(args.get("element", "") or "")
+    if not element:
+        return False
+    if _STRONG_SUBMIT_RE.search(element):
+        return True
+    if _NAV_RE.search(element):
+        return False
+    return bool(_WEAK_SUBMIT_RE.search(element))
 
 
 def _mcp_tools_to_openai(tools) -> list[dict]:
@@ -198,7 +281,7 @@ async def _wait_cdp(port: int, timeout: float = CDP_WAIT_TIMEOUT,
 
 async def _run_agent_turns(session, openai_tools: list[dict], messages: list[dict],
                            worker_id: int, base_url: str, model: str,
-                           headers: dict) -> tuple[str, str]:
+                           headers: dict, dry_run: bool = False) -> tuple[str, str]:
     """Drive one job application to completion via LLM->tool-calling turns.
 
     Shared mutable `messages` keeps full history, so a caller that re-spawns
@@ -211,6 +294,9 @@ async def _run_agent_turns(session, openai_tools: list[dict], messages: list[dic
     # Loop detection across turns: (tool name, arguments) of the last call.
     last_sig: str | None = None
     repeats = 0
+    # Count of submit-like tool calls blocked by dry-run enforcement (see
+    # _looks_like_submit above).
+    dry_run_blocks = 0
 
     async with httpx.AsyncClient(timeout=1200) as http:
         for turn in range(MAX_TURNS):
@@ -262,6 +348,40 @@ async def _run_agent_turns(session, openai_tools: list[dict], messages: list[dic
                     args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
                 except json.JSONDecodeError:
                     args = {}
+
+                if dry_run and _looks_like_submit(name, args):
+                    # Technical enforcement: the real MCP call is never made,
+                    # so the real browser click never fires, regardless of
+                    # what the model does next. Not counted as a repeat --
+                    # an intentional, expected block is not the model looping.
+                    detail = args.get("element") or args.get("key") or ""
+                    add_event(
+                        f"[W{worker_id}] dry-run: blocked submit-like action "
+                        f"({name}: {detail!r})"
+                    )
+                    update_state(worker_id, last_action=f"dry-run blocked: {name}")
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.get("id", name),
+                        "content": (
+                            "BLOCKED (dry run): submit action intercepted and not "
+                            "sent to the browser. This is expected in dry-run mode "
+                            "- the form has been reviewed and is ready. Conclude "
+                            "now with RESULT:APPLIED and a note that this was a "
+                            "dry run."
+                        ),
+                    })
+                    dry_run_blocks += 1
+                    if dry_run_blocks >= _DRY_RUN_BLOCK_LIMIT:
+                        add_event(
+                            f"[W{worker_id}] dry-run: block limit reached, "
+                            "forcing completion"
+                        )
+                        return "dry_run:applied", (
+                            "Dry run: submit blocked repeatedly; treating as "
+                            "completed."
+                        )
+                    continue
 
                 sig = f"{name}:{json.dumps(args, sort_keys=True, default=str)}"
                 repeats = repeats + 1 if sig == last_sig else 1
@@ -396,7 +516,7 @@ async def _drive_agent(job: dict, port: int, worker_id: int, dry_run: bool) -> t
                         raise RuntimeError("no allowed Playwright tools listed by MCP server")
                     return await _run_agent_turns(
                         session, openai_tools, messages, worker_id,
-                        base_url, model, headers,
+                        base_url, model, headers, dry_run=dry_run,
                     )
         except Exception as exc:  # noqa: BLE001 -- re-spawn and retry the server
             last_err = exc

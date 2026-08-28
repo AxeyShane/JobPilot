@@ -43,7 +43,16 @@ _INJECT_PATTERNS = [
     re.compile(r"ignore\s+(?:the\s+)?(?:prior|above|previous|original)\s+instructions?", re.IGNORECASE),
     re.compile(r"disregard\s+prior\s+instructions?", re.IGNORECASE),
     re.compile(r"you\s+are\s+now\b", re.IGNORECASE),
-    re.compile(r"you\s+are\s+an?\b", re.IGNORECASE),
+    # Narrowed to require an AI-persona object so ordinary job-posting
+    # boilerplate ("You are a self-starter...", "You are an experienced
+    # engineer...") is not treated as an injection attempt. The separate
+    # you_are_now pattern above already covers role-reassignment framing
+    # ("you are now the recruiter's assistant").
+    re.compile(
+        r"you\s+are\s+(?:an?\s+)?(?:ai|assistant|agent|system|chatbot|bot|"
+        r"language\s+model|llm|gpt)\b",
+        re.IGNORECASE,
+    ),
     re.compile(r"act\s+as\s+(?:an?\s+)?(?:AI|assistant|agent|system)", re.IGNORECASE),
     re.compile(r"include\s+this", re.IGNORECASE),
     re.compile(r"remember\s+to\s+include", re.IGNORECASE),
