@@ -2110,6 +2110,7 @@ PAGE_HTML = r"""<!DOCTYPE html>
       <p class="card-sub">Choose where you want to find jobs.</p>
 
       <div style="display:flex;gap:0.6rem;margin-bottom:1rem;flex-wrap:wrap;">
+        <button class="btn btn-secondary btn-sm" onclick="applyLocationPreset('city')">🏠 My City</button>
         <button class="btn btn-secondary btn-sm" onclick="applyLocationPreset('mycity')">🏠 My City + Remote</button>
         <button class="btn btn-secondary btn-sm" onclick="applyLocationPreset('remote')">🌍 Remote Only</button>
       </div>
@@ -3079,12 +3080,12 @@ function removeAcceptedLocation(idx) {
 }
 
 function applyLocationPreset(preset) {
-  if (preset === 'mycity') {
+  if (preset === 'city' || preset === 'mycity') {
     var _city = ($('p-city') && $('p-city').value.trim()) || '';
     var _country = ($('p-country') && $('p-country').value.trim()) || '';
     if (!_city) { showToast('Add your city in Profile & Resume first, then try this preset again.'); return; }
     $('loc-primary').value = _country ? (_city + ', ' + _country) : _city;
-    $('loc-remote').value = 'true';
+    $('loc-remote').value = preset === 'city' ? 'false' : 'true';
     _acceptedLocations = [_city, _country].filter(Boolean);
   } else if (preset === 'remote') {
     $('loc-primary').value = '';
