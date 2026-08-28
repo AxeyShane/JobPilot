@@ -17,15 +17,16 @@ start it with --jinja so the chat template emits tool calls.
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import logging
 import os
 import re
 import shutil
+import sys
+import threading
 import time
 from pathlib import Path
-
-import threading
 
 import httpx
 from mcp import ClientSession, StdioServerParameters
@@ -33,8 +34,8 @@ from mcp.client.stdio import stdio_client
 
 from jobpilot import config
 from jobpilot.apply import prompt as prompt_mod
-from jobpilot.apply.result import extract_result as _extract_result
 from jobpilot.apply.dashboard import add_event, get_state, update_state
+from jobpilot.apply.result import extract_result as _extract_result
 from jobpilot.llm import resolve_apply_provider
 
 logger = logging.getLogger(__name__)
@@ -79,6 +80,10 @@ def _npx_env() -> dict:
         if node_dir:
             env["PATH"] = node_dir + os.pathsep + env.get("PATH", "")
             os.environ["PATH"] = env["PATH"]  # also fixes this process's own npx resolution
+        if os.name == "nt" or sys.platform == "win32":
+            npm_dir = os.environ.get("APPDATA", "")
+            if npm_dir:
+                env["npm_config_prefix"] = str(Path(npm_dir) / "npm")
         _cached_npx_env = env
         return env.copy()
 
@@ -285,7 +290,7 @@ async def _wait_cdp(port: int, timeout: float = CDP_WAIT_TIMEOUT,
                 if resp.status_code == 200:
                     return True
             except Exception:
-                pass
+                logger.debug("CDP port %d not ready yet", port)
             await asyncio.sleep(interval)
     return False
 
@@ -406,7 +411,7 @@ async def _run_agent_turns(session, openai_tools: list[dict], messages: list[dic
                     content = "\n".join(p for p in parts if p) or "(no output)"
                     if getattr(result, "is_error", False):
                         content = f"ERROR: {content}"
-                except Exception as e:  # noqa: BLE001 -- feed the error back to the model
+                except Exception as e:
                     content = f"ERROR: {e}"
 
                 ws = get_state(worker_id)
@@ -468,6 +473,53 @@ async def _run_agent_turns(session, openai_tools: list[dict], messages: list[dic
     return "failed:local_agent_max_turns", summary
 
 
+def _safe_errlog() -> io.TextIOBase | None:
+    """Return a stderr stream with a valid OS fileno, or None.
+
+    On Windows, if sys.stderr is wrapped or redirected without an underlying OS
+    descriptor (e.g. StringIO, Rich console buffers, or test runners), passing it
+    to stdio_client causes subprocess.Popen to fail with UnsupportedOperation: 'fileno'.
+    """
+    for stream in (sys.stderr, sys.__stderr__):
+        if stream is not None:
+            try:
+                stream.fileno()
+                return stream
+            except (io.UnsupportedOperation, AttributeError, OSError, ValueError):
+                pass
+    return None
+
+
+def _run_async(coro):
+    """Run an async coroutine with a dedicated event loop (ProactorEventLoop on Windows).
+
+    Windows requires ProactorEventLoop for asyncio subprocess pipes. In worker
+    threads, asyncio.run() or ambient event loop policies may not provide a
+    ProactorEventLoop with subprocess pipe support, leading to MCP stdio bring-up
+    failures with 'fileno'.
+    """
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+        loop = asyncio.ProactorEventLoop()
+    else:
+        loop = asyncio.new_event_loop()
+
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        try:
+            to_cancel = asyncio.all_tasks(loop)
+            for task in to_cancel:
+                task.cancel()
+            if to_cancel:
+                loop.run_until_complete(asyncio.gather(*to_cancel, return_exceptions=True))
+            loop.run_until_complete(loop.shutdown_asyncgens())
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+
+
 async def _drive_agent(job: dict, port: int, worker_id: int, dry_run: bool) -> tuple[str, str]:
     resume_path = job.get("tailored_resume_path")
     txt_path = Path(resume_path).with_suffix(".txt") if resume_path else None
@@ -482,6 +534,9 @@ async def _drive_agent(job: dict, port: int, worker_id: int, dry_run: bool) -> t
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
+    worker_dir = config.APPLY_WORKER_DIR / f"worker-{worker_id}"
+    worker_dir.mkdir(parents=True, exist_ok=True)
+
     server_params = StdioServerParameters(
         command=_mcp_command(),
         args=[
@@ -490,6 +545,7 @@ async def _drive_agent(job: dict, port: int, worker_id: int, dry_run: bool) -> t
             f"--viewport-size={config.DEFAULTS['viewport']}",
         ],
         env=_npx_env(),
+        cwd=str(worker_dir),
     )
 
     # P1 ladder (1/3): Chrome's CDP endpoint must be listening before the MCP
@@ -516,20 +572,23 @@ async def _drive_agent(job: dict, port: int, worker_id: int, dry_run: bool) -> t
     # a transport drop mid-job resumes from where the agent left off instead of
     # failing with a raw TaskGroup traceback; a final clean reason replaces it.
     last_err: Exception | None = None
+    safe_err = _safe_errlog()
     for attempt in range(1, MAX_MCP_ATTEMPTS + 1):
         try:
-            async with stdio_client(server_params) as (read, write):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    listed = await session.list_tools()
-                    openai_tools = _mcp_tools_to_openai(listed.tools)
-                    if not openai_tools:
-                        raise RuntimeError("no allowed Playwright tools listed by MCP server")
-                    return await _run_agent_turns(
-                        session, openai_tools, messages, worker_id,
-                        base_url, model, headers, dry_run=dry_run,
-                    )
-        except Exception as exc:  # noqa: BLE001 -- re-spawn and retry the server
+            async with (
+                stdio_client(server_params, errlog=safe_err) as (read, write),
+                ClientSession(read, write) as session,
+            ):
+                await session.initialize()
+                listed = await session.list_tools()
+                openai_tools = _mcp_tools_to_openai(listed.tools)
+                if not openai_tools:
+                    raise RuntimeError("no allowed Playwright tools listed by MCP server")
+                return await _run_agent_turns(
+                    session, openai_tools, messages, worker_id,
+                    base_url, model, headers, dry_run=dry_run,
+                )
+        except Exception as exc:
             last_err = exc
             logger.warning("[W%d] MCP bring-up attempt %d/%d failed: %s",
                            worker_id, attempt, MAX_MCP_ATTEMPTS, exc)
@@ -563,9 +622,9 @@ def run_job_local(job: dict, port: int, worker_id: int = 0, dry_run: bool = Fals
         lf.write(header)
 
         try:
-            status, transcript = asyncio.run(_drive_agent(job, port, worker_id, dry_run))
+            status, transcript = _run_async(_drive_agent(job, port, worker_id, dry_run))
             lf.write(transcript + "\n")
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             import traceback
             duration_ms = int((time.time() - start) * 1000)
             lf.write(f"ERROR: {e}\n{traceback.format_exc()}\n")
