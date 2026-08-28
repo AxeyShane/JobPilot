@@ -356,13 +356,17 @@ def create_app() -> Flask:
     @app.get("/api/jobs")
     def api_jobs():
         min_score = request.args.get("min_score", type=int)
-        limit = request.args.get("limit", default=200, type=int)
+        limit = request.args.get("limit", default=1000, type=int)
         location = request.args.get("location", default="").strip()
         conn = get_connection()
         where = "1=1"
         params: list = []
         if min_score is not None:
-            where += " AND (fit_score >= ? OR fit_score IS NULL)"
+            # Only real matches: exclude unscored (fit_score IS NULL) rows —
+            # they have no score to filter on and are mostly untitled junk
+            # (Workday/Motorola placeholders). Without this, "Top Matches"
+            # leaked unscored rows in.
+            where += " AND fit_score >= ?"
             params.append(min_score)
         if location:
             # Comma-separated OR match, e.g. "Dubai,UAE,Remote" -- same shape
@@ -1904,7 +1908,7 @@ PAGE_HTML = r"""<!DOCTYPE html>
 
       <select id="job-score-filter" class="filter-select" onchange="loadJobs()">
         <option value="0">All Match Ratings</option>
-        <option value="8">Top Matches Only (8-10)</option>
+        <option value="6">Top Matches Only (6-10)</option>
         <option value="6" selected>Good Matches (6-10)</option>
         <option value="4">Moderate & Above (4-10)</option>
       </select>
@@ -2244,7 +2248,7 @@ function switchTab(tabName) {
 // Home stat cards → Jobs tab (with the matching filter)
 function goToTopMatches() {
   const f = $('job-score-filter');
-  if (f) f.value = '8';            // Top Matches Only (8-10)
+  if (f) f.value = '6';            // matches the Top Matches count (fit >= 6)
   switchTab('jobs');
 }
 function goToJobsAll() {
