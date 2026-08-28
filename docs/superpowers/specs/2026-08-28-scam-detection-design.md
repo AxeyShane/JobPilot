@@ -21,7 +21,20 @@ This protects against a scammy *posting*, not a scammy *follow-up message*.
   sanitization. Result is stored on the row, not recomputed later.
 - `apply/launcher.py`'s `acquire_job()` gets one more `WHERE` clause so a blocked
   job never enters the apply queue — same shape as its existing
-  `blocked_sites`/`blocked_patterns` filtering.
+  `blocked_sites`/`blocked_patterns` filtering. `acquire_job()` has two branches:
+  the general queue-pull, and a `target_url` direct-apply path that today
+  bypasses `blocked_sites`/`blocked_patterns` by design (a manual override for a
+  specific job). The `scam_verdict` check applies to **both** branches, with no
+  bypass — that existing precedent is about automation feasibility (can the bot
+  drive this site), which is fine to override manually; this check is about
+  scam safety, which shouldn't have a silent bypass even on the direct-URL path.
+- Score, tailor, and cover-letter stages also skip `scam_verdict = 'blocked'`
+  rows, not just the apply stage. The gate runs at enrichment, upstream of all
+  three — without this, JobPilot would still spend LLM calls scoring a job,
+  tailoring a resume, and writing a cover letter for a posting it's already
+  determined is a scam, only refusing at the very last step. Skipping earlier
+  saves that cost and keeps the "why didn't this apply" story simple: one
+  verdict, checked once, respected everywhere downstream.
 - Scope: runs on every job **except** `strategy = 'workday_api'` (the curated
   `employers.yaml` allowlist — named real employers, effectively zero scam risk).
   This means it *does* run on LinkedIn/Indeed/Glassdoor-sourced postings even
@@ -57,6 +70,9 @@ Soft match -> escalates to the LLM tie-break rather than blocking outright
   commitments", combined with no concrete company name or role specifics
   ("our confidential client", "the project", "multiple opportunities available")
 
+No match at either level writes `scam_verdict = 'clear'` immediately — no LLM
+call spent on a posting with no scam signal at all.
+
 ## LLM tie-break (only for soft-match / ambiguous cases)
 
 One extra call, only for the minority of jobs the heuristic can't already
@@ -85,8 +101,18 @@ server). This gate does not repeat that pattern:
 
 Three new columns on `jobs`, via the existing `ensure_columns` migration path:
 - `scam_verdict` TEXT — `clear` | `blocked` | NULL (pending)
-- `scam_reasons` TEXT — JSON list of `{category, quoted}`
-- `scam_checked_at` TEXT
+- `scam_reasons` TEXT — JSON list of entries, one shared shape used by both the
+  automated gate and manual user reports (see the sharing spec):
+  `{category: str, quoted: str | null, note: str | null}`. Automated gate
+  entries set `quoted` (the exact posting excerpt that triggered the match) and
+  leave `note` null; user-reported entries set `category: "user-reported"` and
+  `note` (free text), leaving `quoted` null unless a specific excerpt was
+  captured. Same list, same field names, regardless of source — nothing
+  downstream (dashboard badge, exports) needs to branch on where an entry
+  came from.
+- `scam_checked_at` TEXT — set whenever `scam_verdict` is written, including on
+  a manual user report (not just automated gate runs), so "when was this last
+  evaluated" stays a single honest answer regardless of source.
 
 ## Dashboard
 
@@ -102,6 +128,11 @@ Same script-style convention as `test_quality.py` / `test_local_agent.py`:
 - A mocked LLM tie-break test
 - A fail-closed test: simulated LLM error leaves `scam_verdict` NULL, not
   defaulting either direction
+- A test that a blocked job is excluded from score/tailor/cover selection, not
+  just `acquire_job()`
+- A test that the direct-`target_url` branch of `acquire_job()` also respects
+  `scam_verdict = 'blocked'` (no silent bypass), distinct from its existing
+  intentional bypass of `blocked_sites`/`blocked_patterns`
 
 ## Documentation
 

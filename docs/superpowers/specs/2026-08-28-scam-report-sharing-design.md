@@ -30,33 +30,59 @@ proportionate to what this project is.
 - A "Report as scam" action on the job card in the dashboard (`webui.py`),
   next to the existing scam-gate badge.
 - Reporting immediately sets `scam_verdict = 'blocked'` on that row (a human
-  judgment call overrides whatever the automated heuristic/LLM gate said) and
-  appends a `{"category": "user-reported", "note": <optional free text>}`
-  entry to `scam_reasons`.
-- Also stores the posting's `full_description` at the time of the report as a
-  "known-bad" signature — not just the URL. Scammers commonly repost the same
-  pitch under a new URL; matching only the original link would miss the
-  repost. Future postings get fuzzy/substring-matched against previously
-  reported text by the same heuristic-gate machinery, not a separate system.
+  judgment call overrides whatever the automated heuristic/LLM gate said),
+  stamps `scam_checked_at`, and appends an entry to `scam_reasons` using the
+  shared shape defined in the detection spec:
+  `{category: "user-reported", quoted: null, note: <optional free text>}`.
+  Same list, same field names as automated entries — the dashboard badge and
+  any export never need to know which produced a given entry.
+- Also stores the posting's `full_description` at the time of the report in
+  the new `reported_signatures` table (below) as a "known-bad" signature — not
+  just the URL. Scammers commonly repost the same pitch under a new URL;
+  matching only the original link would miss the repost.
 - A `jobpilot report --export` CLI command dumps the user's local reports in
   the exact shape the community file (below) expects — output only, no
   network call, no automatic submission anywhere.
+
+### Matching future postings against reported signatures
+
+Deliberately conservative and stdlib-only, matching the rest of the gate's
+regex-based, no-new-dependency approach (no embeddings, no fuzzy-matching
+library):
+
+- **Primary signal — normalized long-substring containment.** Lowercase and
+  collapse whitespace on both the stored signature and the new posting, then
+  check whether a sufficiently long contiguous window of the signature (a
+  tunable minimum, starting around 40+ characters — long enough that it can
+  only really match a genuine reuse of the same pitch, not shared generic
+  phrasing) appears verbatim in the new text. This is intentionally stricter
+  than similarity scoring: it accepts some missed reposts (a scammer who
+  reworks their pitch each time slips through) in exchange for a low
+  false-positive rate, which matters more here since a match auto-blocks.
+- **Secondary signal — domain, corroborating only, never sufficient alone.**
+  Aggregator-sourced postings (the source this feature targets most) often
+  expose the aggregator's own apply-flow URL rather than the true poster's
+  domain, so a domain match by itself is weak evidence. Domain match only
+  raises confidence when paired with a text-window match; it never triggers a
+  block on its own.
 
 ### The shared file
 
 - New file: `src/jobpilot/config/community_scam_reports.yaml`, committed to
   the repo — same pattern as the existing `sites.yaml`/`employers.yaml`.
 - Per entry: company/entity name as claimed in the posting, any known
-  domain(s), and the quoted scam-pitch excerpt. Explicitly excluded: the
-  individual "recruiter's" name, personal profile links, or any DM content
-  beyond the pitch text itself — same reasoning as keeping the design-doc
-  commit message generic.
-- JobPilot fetches the latest copy from the repo's raw GitHub URL on the
-  normal pipeline cadence, caches it locally. A fetch failure logs a warning
-  and falls back to the last cached copy — this is a supplementary signal on
-  top of the local heuristic/LLM gate, not the primary defense, so it doesn't
-  need that gate's fail-closed strictness (a stale or missing community list
-  should never block the pipeline).
+  domain(s), and the quoted scam-pitch excerpt (the same text used for the
+  substring-containment match above). Explicitly excluded: the individual
+  "recruiter's" name, personal profile links, or any DM content beyond the
+  pitch text itself — same reasoning as keeping the design-doc commit message
+  generic.
+- JobPilot fetches the latest copy from the repo's raw GitHub URL once per
+  pipeline run (not per job — avoids hammering GitHub under worker
+  concurrency), caches it locally with that cadence as the refresh TTL. A
+  fetch failure logs a warning and falls back to the last cached copy — this
+  is a supplementary signal on top of the local heuristic/LLM gate, not the
+  primary defense, so it doesn't need that gate's fail-closed strictness (a
+  stale or missing community list should never block the pipeline).
 
 ### Getting a local report into the shared file
 
@@ -71,24 +97,33 @@ proportionate to what this project is.
 ## Schema
 
 - `jobs.scam_verdict` / `scam_reasons` (from the local-gate spec) get a new
-  possible `scam_reasons` category value: `user-reported`.
-- New local-only table `reported_signatures` (or similar): stores the
-  reported posting text signature + company/domain, for fuzzy-matching future
-  postings. Not synced automatically — feeds `--export` only.
+  possible `scam_reasons` category value: `user-reported`, using that spec's
+  shared entry shape (`category`, `quoted`, `note`).
+- New local-only table `reported_signatures`: stores the reported posting text
+  signature + company/domain, for the substring-containment matching above.
+  Not synced automatically — feeds `--export` only.
 
 ## Explicitly out of scope for this spec
 
 - Any live network sync, hosting, or accounts.
 - Automated PR submission.
 - Any personal/identifying information about the individual scammer.
+- Similarity/fuzzy matching beyond normalized substring containment (an
+  embeddings- or edit-distance-based matcher is a possible future upgrade, not
+  part of this design).
 
 ## Testing
 
-- Local report action: verdict override + signature stored, unit-testable
-  the same way as the existing gate tests.
-- Fuzzy-match of a new posting against a previously reported signature:
-  positive (near-identical repost) and negative (unrelated posting) cases.
+- Local report action: verdict override + `scam_checked_at` stamp + signature
+  stored, unit-testable the same way as the existing gate tests.
+- Substring-containment match against a reported signature: positive
+  (near-identical repost, same long window present) and negative (unrelated
+  posting, generic phrase overlap only, below the length threshold) cases —
+  the negative case specifically proving generic-phrasing overlap alone does
+  not trigger a block.
+- Domain-only match (no text-window match) confirmed to never block by itself.
 - Community-file fetch: cached-copy fallback on network failure, never
-  blocking the pipeline.
+  blocking the pipeline; confirms the fetch happens once per pipeline run, not
+  once per job.
 - `--export` output shape: matches what the community file expects, byte for
   byte on a fixed fixture.
