@@ -1800,22 +1800,22 @@ PAGE_HTML = r"""<!DOCTYPE html>
 
     <!-- 4 Big Friendly Numbers -->
     <div class="stats-grid">
-      <div class="stat-card">
+      <div class="stat-card" role="button" tabindex="0" onclick="goToJobsAll()" onkeydown="if(event.key==='Enter'||event.key===' '){goToJobsAll();}" style="cursor:pointer;" title="Click to see all jobs">
         <div class="stat-card-top">
           <span class="stat-label">Jobs Found</span>
           <span class="stat-icon">💼</span>
         </div>
         <div class="stat-num" id="stat-found">0</div>
-        <div class="stat-desc">Total job postings discovered</div>
+        <div class="stat-desc">Total job postings discovered — click to view</div>
       </div>
 
-      <div class="stat-card">
+      <div class="stat-card" role="button" tabindex="0" onclick="goToTopMatches()" onkeydown="if(event.key==='Enter'||event.key===' '){goToTopMatches();}" style="cursor:pointer;" title="Click to see your top matches">
         <div class="stat-card-top">
           <span class="stat-label">Top Matches</span>
           <span class="stat-icon">⭐</span>
         </div>
         <div class="stat-num" id="stat-matches" style="color:var(--success);">0</div>
-        <div class="stat-desc">Highly rated for your profile</div>
+        <div class="stat-desc">Highly rated for your profile — click to view</div>
       </div>
 
       <div class="stat-card">
@@ -2239,6 +2239,18 @@ function switchTab(tabName) {
   if (tabName === 'jobs') loadJobs();
   if (tabName === 'safety') loadSafetyJobs();
   if (tabName === 'settings') loadSettings();
+}
+
+// Home stat cards → Jobs tab (with the matching filter)
+function goToTopMatches() {
+  const f = $('job-score-filter');
+  if (f) f.value = '8';            // Top Matches Only (8-10)
+  switchTab('jobs');
+}
+function goToJobsAll() {
+  const f = $('job-score-filter');
+  if (f) f.value = '0';            // All Match Ratings
+  switchTab('jobs');
 }
 
 // ---------------------------------------------------------------------------
