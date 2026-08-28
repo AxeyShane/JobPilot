@@ -1,0 +1,45 @@
+# JobPilot Community Scam Reports
+# Version: 1
+#
+# This file contains verified community signatures for scam job postings.
+# Subscribed / imported locally to protect against known scam campaigns across boards.
+#
+# Privacy Boundary (Strict & Non-negotiable):
+# - ONLY facts from scraped posting excerpts, patterns, and sanitized notes.
+# - NEVER include personal names, applicant CV details, emails, or phone numbers.
+# - All sample records below use synthetic company names and anonymized descriptions.
+
+version: 1
+reports:
+  - id: "6a62b8db18a748fffa1c1ba3b4869fa5dd43d988137a7b18bdc5220d40846602"
+    reported_at: "2026-08-28T12:00:00Z"
+    company: "Apex Horizon Solutions"
+    domain: "apex-horizon-careers.com"
+    signatures:
+      - "wire transfer of the equipment purchase funds to our verified supplier"
+      - "check will be issued for your home office workstation purchase"
+    pattern_type: "fake-check-equipment"
+    source_channel: "community-feed"
+    notes: "Requires applicant to deposit fake company check and wire funds for equipment"
+
+  - id: "606bd84ce051b944529a3462521c2fbf19a1cc14433017db3a2405257fdb697c"
+    reported_at: "2026-08-28T13:30:00Z"
+    company: "Vanguard Global Logistics"
+    domain: "vanguard-logistics-group.net"
+    signatures:
+      - "contact our hiring manager on Telegram @vanguard_hr_desk"
+      - "interview will be conducted exclusively via Telegram text chat"
+    pattern_type: "off-platform-pivot"
+    source_channel: "community-feed"
+    notes: "Immediate pivot to Telegram text interview with no face-to-face or official portal"
+
+  - id: "474059db6092825b21eae3c97e175443713305481cf9fc4bd3158d25e4965848"
+    reported_at: "2026-08-28T14:15:00Z"
+    company: "Summit Cloud Partners"
+    domain: "summit-cloud-careers.org"
+    signatures:
+      - "refundable registration fee for background verification processing"
+      - "mandatory equipment onboarding fee prior to contract issuance"
+    pattern_type: "advance-fee"
+    source_channel: "community-feed"
+    notes: "Asks for upfront registration fee before sending employment contract"

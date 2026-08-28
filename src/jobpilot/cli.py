@@ -819,6 +819,118 @@ def upskill_cmd(
         console.print(f"  - {step}")
 
 
+@app.command("report")
+def report_cmd(
+    url_or_action: str | None = typer.Argument(
+        None,
+        metavar="[URL | list | export]",
+        help="Job URL to report, or action 'list' / 'export'.",
+    ),
+    note: str | None = typer.Option(
+        None,
+        "--note",
+        "-n",
+        help="Free-text note explaining the scam pattern / red flag.",
+    ),
+    snippet: str | None = typer.Option(
+        None,
+        "--snippet",
+        "-s",
+        help="Specific text snippet / phrase from the posting to use as signature.",
+    ),
+    export: bool = typer.Option(
+        False,
+        "--export",
+        "-e",
+        help="Export local scam reports as paste-ready YAML.",
+    ),
+    list_reports: bool = typer.Option(
+        False,
+        "--list",
+        "-l",
+        help="List all reported scam signatures / jobs in the database.",
+    ),
+    import_file: str | None = typer.Option(
+        None,
+        "--import",
+        "-i",
+        help="Import community scam reports from a local YAML file.",
+    ),
+) -> None:
+    """Report scam job postings, manage signatures, and export community reports."""
+    _bootstrap()
+    from jobpilot.database import get_connection
+    from jobpilot.scam_report import (
+        export_reports_yaml,
+        fetch_community_reports,
+        get_active_signatures,
+        init_reported_signatures,
+        record_report,
+    )
+
+    conn = get_connection()
+    init_reported_signatures(conn)
+
+    # 1. Export mode: jobpilot report --export or jobpilot report export
+    if export or url_or_action == "export":
+        yaml_out = export_reports_yaml(conn)
+        console.print(yaml_out, highlight=False)
+        return
+
+    # 2. List mode: jobpilot report --list or jobpilot report list
+    if list_reports or url_or_action == "list":
+        sigs = get_active_signatures(conn)
+        if not sigs:
+            console.print("[yellow]No reported signatures found in database.[/yellow]")
+            return
+        table = Table(title="Reported Scam Signatures", show_header=True, header_style="bold red")
+        table.add_column("ID", style="dim", max_width=12)
+        table.add_column("Source", style="cyan")
+        table.add_column("Pattern Type", style="yellow")
+        table.add_column("Company / Domain", style="green")
+        table.add_column("Signature Excerpt")
+        for s in sigs:
+            comp = s.get("company") or s.get("domain") or "-"
+            sig_text = (s.get("signature_text") or "")[:80]
+            table.add_row(
+                (s.get("id") or "")[:8],
+                s.get("source") or "local_user",
+                s.get("pattern_type") or "user-reported",
+                comp,
+                sig_text,
+            )
+        console.print(table)
+        return
+
+    # 3. Import community YAML file: jobpilot report --import <path>
+    if import_file:
+        imported = fetch_community_reports(import_file, conn=conn, ingest=True)
+        console.print(f"[green]Imported {len(imported)} community report(s) into database.[/green]")
+        return
+
+    # 4. Report a specific job: jobpilot report <url> [--note ...]
+    if url_or_action:
+        url = url_or_action
+        result = record_report(
+            job=url,
+            note=note or "",
+            conn=conn,
+            snippet=snippet,
+        )
+        console.print(f"[bold red]Blocked and reported job:[/] {url}")
+        if result.get("note"):
+            console.print(f"  [dim]Note:[/] {result['note']}")
+        if result.get("signatures"):
+            console.print("  [bold]Extracted signature(s):[/]")
+            for sig in result["signatures"]:
+                console.print(f"    - {sig}")
+        return
+
+    console.print(
+        "[dim]Usage: jobpilot report <URL> [--note <text>] | "
+        "jobpilot report --export | jobpilot report --list[/dim]"
+    )
+
 
 if __name__ == "__main__":
     app()
