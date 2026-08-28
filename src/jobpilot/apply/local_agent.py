@@ -25,6 +25,8 @@ import shutil
 import time
 from pathlib import Path
 
+import threading
+
 import httpx
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -37,15 +39,18 @@ from jobpilot.llm import resolve_apply_provider
 
 logger = logging.getLogger(__name__)
 
+_env_lock = threading.Lock()
+_cached_npx_env: dict | None = None
+
 
 def _find_node_dir() -> str | None:
-    """Locate node.exe's directory: PATH first, then common install locations.
+    r"""Locate node.exe's directory: PATH first, then common install locations.
 
     npx needs its own directory AND node.exe's directory on PATH to run.
     Bare 'npx'/'cmd' resolution via shutil.which() can silently pick up a
     non-Windows shim on a dev box with msys64/git-bash also on PATH
     (observed: shutil.which('cmd') resolving to a msys shell script instead
-    of System32\\cmd.exe -> WinError 193 "not a valid Win32 application").
+    of System32\cmd.exe -> WinError 193 "not a valid Win32 application").
     Explicit candidate search avoids depending on ambient PATH ordering.
     """
     node_exe = shutil.which("node") or shutil.which("node.exe")
@@ -63,13 +68,19 @@ def _find_node_dir() -> str | None:
 
 def _npx_env() -> dict:
     """Environment for the Playwright MCP subprocess, with node's directory
-    guaranteed to be first on PATH regardless of the caller's PATH state."""
-    env = os.environ.copy()
-    node_dir = _find_node_dir()
-    if node_dir:
-        env["PATH"] = node_dir + os.pathsep + env.get("PATH", "")
-        os.environ["PATH"] = env["PATH"]  # also fixes this process's own npx resolution
-    return env
+    guaranteed to be first on PATH regardless of the caller's PATH state.
+    Thread-safe across concurrent worker threads."""
+    global _cached_npx_env
+    with _env_lock:
+        if _cached_npx_env is not None:
+            return _cached_npx_env.copy()
+        env = os.environ.copy()
+        node_dir = _find_node_dir()
+        if node_dir:
+            env["PATH"] = node_dir + os.pathsep + env.get("PATH", "")
+            os.environ["PATH"] = env["PATH"]  # also fixes this process's own npx resolution
+        _cached_npx_env = env
+        return env.copy()
 
 
 # A real ATS form (Eightfold, Workday, Oracle) takes more than 40 turns to

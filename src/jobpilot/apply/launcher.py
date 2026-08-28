@@ -175,15 +175,19 @@ def acquire_job(target_url: str | None = None, min_score: int = 6,
                   AND (scam_verdict = 'clear' OR strategy = 'workday_api')
                   {site_clause}
                   {url_clauses}
-                -- Least-attempted first. Ordering by score alone meant a
-                -- single hard job was re-acquired every pass: it fails, is
-                -- marked 'failed', stays eligible (attempts < cap), and is
-                -- still the top row -- so one Eightfold form consumed an
-                -- entire `--limit 3` run, and "0 applied, 15 failed" cycles
-                -- were often 15 attempts at the same handful of jobs.
-                -- Fresh jobs now go first; retries happen once the untried
-                -- queue is drained.
-                ORDER BY COALESCE(apply_attempts, 0) ASC, fit_score DESC, url
+                -- Freshness-first apply queue:
+                -- 1. Primary: discovery day DESC (newest postings first so we apply within minutes
+                --    of posting; on competitive boards, first 10-30 applicants get 30-50% higher callback).
+                --    NULL or empty discovered_at treated as oldest (sorted last).
+                -- 2. Secondary: least-attempts-first WITHIN the same discovery day (so a fresh-untried
+                --    job beats a fresh-retried one, but an old job never beats a newer one).
+                -- 3. Tertiary: latest exact timestamp (discovered_at DESC) within the same day/attempt bucket.
+                -- 4. Quaternary: fit_score DESC, then url ASC for deterministic tie-breaking.
+                ORDER BY COALESCE(substr(discovered_at, 1, 10), '') DESC,
+                         COALESCE(apply_attempts, 0) ASC,
+                         COALESCE(discovered_at, '') DESC,
+                         fit_score DESC,
+                         url ASC
                 LIMIT 1
             """
             _queue_params = [config.DEFAULTS["max_apply_attempts"]] + params
@@ -580,11 +584,200 @@ def _is_permanent_failure(result: str) -> bool:
 # Worker loop
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Rate limiting & Pacing Guard
+# ---------------------------------------------------------------------------
+
+class RateLimiter:
+    """Thread-safe rate-limiting and pacing guard for apply workers.
+
+    Prevents parallel workers from hitting the same job board too rapidly
+    (per-site pacing interval, default 60s) and enforces daily action caps
+    (e.g. LinkedIn <= 100 actions/day) across all workers.
+    """
+
+    def __init__(
+        self,
+        default_min_interval: float | None = None,
+        site_intervals: dict[str, float] | None = None,
+        daily_caps: dict[str, int] | None = None,
+        default_daily_cap: int | None = None,
+    ):
+        if default_min_interval is None:
+            env_val = os.environ.get("JOBPILOT_APPLY_MIN_INTERVAL") or os.environ.get("APPLY_SITE_MIN_INTERVAL")
+            self.default_min_interval = float(env_val) if env_val else 60.0
+        else:
+            self.default_min_interval = float(default_min_interval)
+
+        self.site_intervals = site_intervals or {}
+
+        # Default daily cap for LinkedIn is 100 actions/day
+        env_li_cap = os.environ.get("JOBPILOT_LINKEDIN_DAILY_CAP") or os.environ.get("APPLY_LINKEDIN_DAILY_CAP")
+        li_cap = int(env_li_cap) if env_li_cap else 100
+
+        self.daily_caps = {"linkedin": li_cap}
+        if daily_caps:
+            self.daily_caps.update(daily_caps)
+
+        env_default_cap = os.environ.get("JOBPILOT_SITE_DAILY_CAP") or os.environ.get("APPLY_SITE_DAILY_CAP")
+        self.default_daily_cap = int(env_default_cap) if env_default_cap else (default_daily_cap or 250)
+
+        self._lock = threading.Lock()
+        self._last_action_times: dict[str, float] = {}
+        self._daily_counts: dict[str, tuple[str, int]] = {}  # site -> (date_str, count)
+
+    def normalize_site(self, site_or_url: str | None) -> str:
+        """Normalize site name or URL into a canonical site key."""
+        if not site_or_url:
+            return "unknown"
+        s = str(site_or_url).strip().lower()
+        if "://" in s or "/" in s:
+            domain = s.split("://", 1)[-1].split("/", 1)[0].split("?", 1)[0]
+            domain = domain.split(":")[0]
+            if domain.startswith("www."):
+                domain = domain[4:]
+            for known in (
+                "linkedin", "indeed", "workday", "greenhouse", "lever",
+                "smartrecruiters", "ashby", "dice", "ziprecruiter", "glassdoor",
+            ):
+                if known in domain:
+                    return known
+            return domain or s
+        return s
+
+    def get_min_interval(self, site: str) -> float:
+        """Get the configured min interval for a site."""
+        norm = self.normalize_site(site)
+        return self.site_intervals.get(norm, self.default_min_interval)
+
+    def get_daily_cap(self, site: str) -> int:
+        """Get the daily action cap for a site."""
+        norm = self.normalize_site(site)
+        return self.daily_caps.get(norm, self.default_daily_cap)
+
+    def can_apply(self, site_or_url: str | None) -> tuple[bool, str | None]:
+        """Check if an application is allowed under the daily cap.
+
+        Returns:
+            Tuple of (allowed: bool, reason: str | None).
+        """
+        norm = self.normalize_site(site_or_url)
+        cap = self.get_daily_cap(norm)
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        with self._lock:
+            recorded_date, mem_count = self._daily_counts.get(norm, (today, 0))
+            if recorded_date != today:
+                mem_count = 0
+                self._daily_counts[norm] = (today, 0)
+
+        db_count = self._get_db_daily_count(norm, today)
+        total_count = max(mem_count, db_count)
+
+        if total_count >= cap:
+            return False, f"daily cap exceeded for {norm}: {total_count}/{cap}"
+        return True, None
+
+    def _get_db_daily_count(self, norm_site: str, today: str) -> int:
+        """Query DB for today's attempts on this site."""
+        try:
+            conn = get_connection()
+            like = f"%{norm_site}%"
+            row = conn.execute("""
+                SELECT COUNT(*) FROM jobs
+                WHERE (LOWER(site) LIKE ? OR LOWER(url) LIKE ? OR LOWER(application_url) LIKE ?)
+                  AND (
+                      (applied_at IS NOT NULL AND applied_at LIKE ?)
+                      OR (last_attempted_at IS NOT NULL AND last_attempted_at LIKE ?)
+                  )
+            """, (like, like, like, f"{today}%", f"{today}%")).fetchone()
+            return int(row[0]) if row else 0
+        except Exception:
+            return 0
+
+    def record_action(self, site_or_url: str | None) -> None:
+        """Record an action for a site (increments today's counter)."""
+        norm = self.normalize_site(site_or_url)
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        with self._lock:
+            recorded_date, count = self._daily_counts.get(norm, (today, 0))
+            if recorded_date != today:
+                count = 0
+            self._daily_counts[norm] = (today, count + 1)
+
+    def acquire_pacing(
+        self,
+        site_or_url: str | None,
+        min_interval: float | None = None,
+        stop_event: threading.Event | None = None,
+    ) -> float:
+        """Enforce per-site pacing between consecutive submissions across workers.
+
+        If another worker submitted/applied to this site less than `min_interval`
+        seconds ago, blocks until the interval has elapsed.
+
+        Args:
+            site_or_url: Site identifier or URL.
+            min_interval: Optional override for interval (seconds).
+            stop_event: Optional threading.Event for interruptible wait.
+
+        Returns:
+            Seconds waited (0.0 if no wait was needed).
+        """
+        norm = self.normalize_site(site_or_url)
+        interval = min_interval if min_interval is not None else self.get_min_interval(norm)
+        if interval <= 0:
+            with self._lock:
+                self._last_action_times[norm] = time.time()
+            return 0.0
+
+        wait_needed = 0.0
+        with self._lock:
+            now = time.time()
+            last_time = self._last_action_times.get(norm)
+            if last_time is None or (last_time <= now and (now - last_time) >= interval):
+                wait_needed = 0.0
+                self._last_action_times[norm] = now
+            elif last_time <= now:
+                wait_needed = interval - (now - last_time)
+                self._last_action_times[norm] = now + wait_needed
+            else:  # last_time > now (already scheduled into future)
+                wait_needed = (last_time - now) + interval
+                self._last_action_times[norm] = last_time + interval
+
+        if wait_needed > 0:
+            if stop_event is not None:
+                stop_event.wait(timeout=wait_needed)
+            else:
+                time.sleep(wait_needed)
+
+        return wait_needed
+
+    def reset(self) -> None:
+        """Reset in-memory pacing and daily counters (useful in tests)."""
+        with self._lock:
+            self._last_action_times.clear()
+            self._daily_counts.clear()
+
+
+_default_rate_limiter = RateLimiter()
+
+
+def get_rate_limiter() -> RateLimiter:
+    """Get the global default RateLimiter instance."""
+    return _default_rate_limiter
+
+
+# ---------------------------------------------------------------------------
+# Worker loop
+# ---------------------------------------------------------------------------
+
 def worker_loop(worker_id: int = 0, limit: int = 1,
                 target_url: str | None = None,
                 min_score: int = 6, headless: bool = False,
                 model: str = "sonnet", dry_run: bool = False,
-                engine: str = "claude") -> tuple[int, int]:
+                engine: str = "claude",
+                rate_limiter: RateLimiter | None = None) -> tuple[int, int]:
     """Run jobs sequentially until limit is reached or queue is empty.
 
     Args:
@@ -598,10 +791,14 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
         engine: "claude" (spawns Claude Code CLI per job, costs API usage) or
             "local" (drives the same Playwright MCP server via whatever LLM
             is configured in .env -- no Claude Code usage).
+        rate_limiter: Optional custom RateLimiter instance for pacing / cap guards.
 
     Returns:
         Tuple of (applied_count, failed_count).
     """
+    if rate_limiter is None:
+        rate_limiter = get_rate_limiter()
+
     applied = 0
     failed = 0
     continuous = limit == 0
@@ -635,6 +832,25 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
 
         empty_polls = 0
 
+        # Site safety guards: check daily cap and enforce per-site pacing
+        site = job.get("site") or job.get("application_url") or job.get("url")
+        allowed, reason = rate_limiter.can_apply(site)
+        if not allowed:
+            logger.warning("[W%d] %s", worker_id, reason)
+            add_event(f"[W{worker_id}] Rate limit: {reason}")
+            release_lock(job["url"])
+            if _stop_event.wait(timeout=1.0):
+                break
+            continue
+
+        waited = rate_limiter.acquire_pacing(site, stop_event=_stop_event)
+        if _stop_event.is_set():
+            release_lock(job["url"])
+            break
+        if waited > 0:
+            logger.info("[W%d] Paced %s for %.1fs", worker_id, site, waited)
+            add_event(f"[W{worker_id}] Pacing {site} ({waited:.1f}s)")
+
         chrome_proc = None
         try:
             add_event(f"[W{worker_id}] Launching Chrome...")
@@ -648,11 +864,14 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
                 result, duration_ms = run_job(job, port=port, worker_id=worker_id,
                                                 model=model, dry_run=dry_run)
 
+            # Record action for daily cap tracking
+            rate_limiter.record_action(site)
+
             if result == "skipped":
                 release_lock(job["url"])
                 add_event(f"[W{worker_id}] Skipped: {job['title'][:30]}")
                 continue
-            elif result == "applied":
+            elif result == "applied" or result == "dry_run:applied":
                 mark_result(job["url"], "applied", duration_ms=duration_ms)
                 applied += 1
                 update_state(worker_id, jobs_applied=applied,
@@ -691,13 +910,110 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
 
 
 # ---------------------------------------------------------------------------
-# Main entry point (called from cli.py)
+# Parallel runner and main entry point
 # ---------------------------------------------------------------------------
+
+def run_jobs(
+    workers: int = 1,
+    limit: int = 1,
+    target_url: str | None = None,
+    min_score: int = 6,
+    headless: bool = False,
+    model: str = "sonnet",
+    dry_run: bool = False,
+    continuous: bool = False,
+    poll_interval: int = 60,
+    engine: str = "claude",
+    rate_limiter: RateLimiter | None = None,
+) -> tuple[int, int]:
+    """Launch apply workers concurrently across N threads.
+
+    Args:
+        workers: Number of parallel worker threads.
+        limit: Max total jobs to process (0 = continuous).
+        target_url: Apply to a specific URL.
+        min_score: Minimum fit_score threshold.
+        headless: Run Chrome headless.
+        model: Claude model name (engine="claude" only).
+        dry_run: Don't click Submit.
+        continuous: Run forever, polling for new jobs.
+        poll_interval: Seconds between DB polls when queue is empty.
+        engine: "claude" or "local".
+        rate_limiter: Optional custom RateLimiter instance.
+
+    Returns:
+        Tuple of (total_applied, total_failed).
+    """
+    global POLL_INTERVAL
+    POLL_INTERVAL = poll_interval
+    _stop_event.clear()
+
+    if continuous:
+        effective_limit = 0
+    else:
+        effective_limit = limit
+
+    # Initialize dashboard for all workers
+    for i in range(workers):
+        init_worker(i)
+
+    if workers <= 1:
+        return worker_loop(
+            worker_id=0,
+            limit=effective_limit,
+            target_url=target_url,
+            min_score=min_score,
+            headless=headless,
+            model=model,
+            dry_run=dry_run,
+            engine=engine,
+            rate_limiter=rate_limiter,
+        )
+
+    # Multi-worker — distribute limit across workers
+    if effective_limit:
+        base = effective_limit // workers
+        extra = effective_limit % workers
+        limits = [base + (1 if i < extra else 0) for i in range(workers)]
+    else:
+        limits = [0] * workers  # continuous mode
+
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="apply-worker") as executor:
+        futures = {
+            executor.submit(
+                worker_loop,
+                worker_id=i,
+                limit=limits[i],
+                target_url=target_url,
+                min_score=min_score,
+                headless=headless,
+                model=model,
+                dry_run=dry_run,
+                engine=engine,
+                rate_limiter=rate_limiter,
+            ): i
+            for i in range(workers)
+        }
+
+        results: list[tuple[int, int]] = []
+        for future in as_completed(futures):
+            wid = futures[future]
+            try:
+                results.append(future.result())
+            except Exception:
+                logger.exception("Worker %d crashed", wid)
+                results.append((0, 0))
+
+    total_applied = sum(r[0] for r in results)
+    total_failed = sum(r[1] for r in results)
+    return total_applied, total_failed
+
 
 def main(limit: int = 1, target_url: str | None = None,
          min_score: int = 6, headless: bool = False, model: str = "sonnet",
          dry_run: bool = False, continuous: bool = False,
-         poll_interval: int = 60, workers: int = 1, engine: str = "claude") -> None:
+         poll_interval: int = 60, workers: int = 1, engine: str = "claude",
+         rate_limiter: RateLimiter | None = None) -> None:
     """Launch the apply pipeline.
 
     Args:
@@ -712,6 +1028,7 @@ def main(limit: int = 1, target_url: str | None = None,
         workers: Number of parallel workers (default 1).
         engine: "claude" (default, costs Claude Code API usage per job) or
             "local" (drives the browser via the configured LLM instead).
+        rate_limiter: Optional custom RateLimiter instance.
     """
     global POLL_INTERVAL
     POLL_INTERVAL = poll_interval
@@ -726,10 +1043,6 @@ def main(limit: int = 1, target_url: str | None = None,
     else:
         effective_limit = limit
         mode_label = f"{limit} jobs"
-
-    # Initialize dashboard for all workers
-    for i in range(workers):
-        init_worker(i)
 
     worker_label = f"{workers} worker{'s' if workers > 1 else ''}"
     console.print(f"Launching apply pipeline ({mode_label}, {worker_label}, poll every {POLL_INTERVAL}s)...")
@@ -773,56 +1086,19 @@ def main(limit: int = 1, target_url: str | None = None,
             refresh_thread = threading.Thread(target=_refresh, daemon=True)
             refresh_thread.start()
 
-            if workers == 1:
-                # Single worker — run directly in main thread
-                total_applied, total_failed = worker_loop(
-                    worker_id=0,
-                    limit=effective_limit,
-                    target_url=target_url,
-                    min_score=min_score,
-                    headless=headless,
-                    model=model,
-                    dry_run=dry_run,
-                    engine=engine,
-                )
-            else:
-                # Multi-worker — distribute limit across workers
-                if effective_limit:
-                    base = effective_limit // workers
-                    extra = effective_limit % workers
-                    limits = [base + (1 if i < extra else 0)
-                              for i in range(workers)]
-                else:
-                    limits = [0] * workers  # continuous mode
-
-                with ThreadPoolExecutor(max_workers=workers,
-                                        thread_name_prefix="apply-worker") as executor:
-                    futures = {
-                        executor.submit(
-                            worker_loop,
-                            worker_id=i,
-                            limit=limits[i],
-                            target_url=target_url,
-                            min_score=min_score,
-                            headless=headless,
-                            model=model,
-                            dry_run=dry_run,
-                            engine=engine,
-                        ): i
-                        for i in range(workers)
-                    }
-
-                    results: list[tuple[int, int]] = []
-                    for future in as_completed(futures):
-                        wid = futures[future]
-                        try:
-                            results.append(future.result())
-                        except Exception:
-                            logger.exception("Worker %d crashed", wid)
-                            results.append((0, 0))
-
-                total_applied = sum(r[0] for r in results)
-                total_failed = sum(r[1] for r in results)
+            total_applied, total_failed = run_jobs(
+                workers=workers,
+                limit=effective_limit,
+                target_url=target_url,
+                min_score=min_score,
+                headless=headless,
+                model=model,
+                dry_run=dry_run,
+                continuous=continuous,
+                poll_interval=poll_interval,
+                engine=engine,
+                rate_limiter=rate_limiter,
+            )
 
             _dashboard_running = False
             refresh_thread.join(timeout=2)
