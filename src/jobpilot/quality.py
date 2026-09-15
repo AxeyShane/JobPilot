@@ -144,11 +144,18 @@ def _section_issues(text):
         hits = [low.find(t) for t in terms if low.find(t) != -1]
         return min(hits) if hits else None
 
+    # Matches the fixed order scoring/tailor.py's assemble_resume_text()
+    # always emits (SUMMARY, TECHNICAL SKILLS, EXPERIENCE, PROJECTS,
+    # EDUCATION) -- this was previously (summary, education, experience,
+    # skills), which flagged every single resume from this pipeline as
+    # "interleaved" since education always legitimately comes last. Caught
+    # by wiring ats_check into the tailor retry loop for the first time and
+    # running it against real assembled output.
     order = [
         ("summary", pos("summary", "profile summary", "objective", "professional summary")),
-        ("education", pos("education", "academic", "qualifications", "degrees")),
-        ("experience", pos("experience", "professional experience", "work history", "employment")),
         ("skills", pos("skills", "technical skills", "core competencies")),
+        ("experience", pos("experience", "professional experience", "work history", "employment")),
+        ("education", pos("education", "academic", "qualifications", "degrees")),
     ]
     named = [(k, v) for k, v in order if v is not None]
     out = []
@@ -260,6 +267,15 @@ def _knowledge_from_profile(profile):
         if isinstance(v, list):
             out.update(str(x).lower() for x in v)
     return out
+
+
+def knowledge_from_profile(profile):
+    """Public alias for _knowledge_from_profile -- what the profile genuinely
+    claims, for callers outside this module (e.g. scoring/tailor.py's
+    ats_check wiring) that need the same "genuinely supported" set
+    reviewer_pass uses, without reaching into a private name.
+    """
+    return _knowledge_from_profile(profile)
 
 
 def _posting_keywords(posting):
