@@ -86,6 +86,18 @@ def _build_skills_set(profile: dict) -> set[str]:
     return allowed
 
 
+_PROJECT_NAME_SPLIT = re.compile(r"\s[–—-]\s")  # " - " / " – " / " — " (hyphen, en dash, or em dash)
+
+
+def _project_short_name(project: str) -> str:
+    """The name portion of a preserved_projects entry, before its first
+    " - "-style separator (profile entries are often "Name - long
+    description", not a literal string a tailored resume would reproduce).
+    """
+    m = _PROJECT_NAME_SPLIT.search(project)
+    return project[:m.start()].strip() if m else project.strip()
+
+
 def sanitize_text(text: str) -> str:
     """Auto-fix common LLM output issues instead of rejecting."""
     text = text.replace(" \u2014 ", ", ").replace("\u2014", ", ")   # em dash -> comma
@@ -309,10 +321,18 @@ def validate_tailored_resume(text: str, profile: dict, original_text: str = "") 
         if company.lower() not in text_lower:
             errors.append(f"Company '{company}' missing -- cannot remove real experience")
 
-    # 4. Check projects preserved
+    # 4. Check projects preserved -- a profile's preserved_projects entries
+    # are often "Name - full descriptive sentence" (see profile.json), not a
+    # literal string a tailored resume would ever reproduce verbatim; the
+    # tailor prompt reasonably shortens these to just the name. Check the
+    # name portion (before the first " - "/" -- "/" — " separator) against
+    # the resume text instead of the whole sentence, so this only warns when
+    # the actual project is missing, not whenever its description gets
+    # reworded (which the tailor prompt explicitly asks for).
     for project in resume_facts.get("preserved_projects", []):
-        if project.lower() not in text_lower:
-            warnings.append(f"Project '{project}' not found -- may have been renamed")
+        short_name = _project_short_name(project)
+        if short_name.lower() not in text_lower:
+            warnings.append(f"Project '{short_name}' not found -- may have been renamed")
 
     # 5. Check school preserved
     preserved_school = resume_facts.get("preserved_school", "")
