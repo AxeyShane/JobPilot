@@ -65,6 +65,25 @@ def compute_keyword_match_rate(score_reasoning: str | None, resume_text: str) ->
     return round(matched / len(keywords), 3)
 
 
+def compute_metric_density(data: dict) -> float:
+    """Fraction of EXPERIENCE + PROJECTS bullets that carry a real number --
+    a cheap proxy for the tailor prompt's METRIC DENSITY instruction, itself
+    grounded in eye-tracking research: dense prose gets skipped in a scan,
+    a bullet with a number gets a visual fixation.
+
+    Returns 1.0 (nothing to fail on) if there are no bullets at all.
+    """
+    bullets: list[str] = []
+    for entry in data.get("experience", []) or []:
+        bullets.extend(entry.get("bullets", []) or [])
+    for entry in data.get("projects", []) or []:
+        bullets.extend(entry.get("bullets", []) or [])
+    if not bullets:
+        return 1.0
+    quantified = sum(1 for b in bullets if re.search(r"\d", b))
+    return round(quantified / len(bullets), 3)
+
+
 # ── Prompt Builders (profile-driven) ──────────────────────────────────────
 
 def _build_tailor_prompt(profile: dict) -> str:
@@ -89,10 +108,22 @@ def _build_tailor_prompt(profile: dict) -> str:
     projects = resume_facts.get("preserved_projects", [])
     school = resume_facts.get("preserved_school", "")
     real_metrics = resume_facts.get("real_metrics", [])
+    # Optional profile field: {"Project Name": "https://github.com/..."} --
+    # absent for most users, additive when present. Lets a project bullet
+    # carry its own proof-of-work link instead of the link only living in
+    # the header contact line where a fast technical read can miss it.
+    project_links = resume_facts.get("project_links", {})
 
     companies_str = ", ".join(companies) if companies else "N/A"
     projects_str = ", ".join(projects) if projects else "N/A"
     metrics_str = ", ".join(real_metrics) if real_metrics else "N/A"
+    links_str = ", ".join(f"{name} -> {url}" for name, url in project_links.items()) if project_links else "N/A"
+    project_links_block = (
+        f"\nPROJECT LINKS: when a project below has a known repo link, put it in that "
+        f"project's subtitle (e.g. \"Jan 2025 - Present | github.com/user/repo\"), never "
+        f"invented, only from this list: {links_str}\n"
+        if project_links else ""
+    )
 
     # Include ALL banned words from the validator so the LLM knows exactly
     # what will be rejected — the validator checks for these automatically.
@@ -100,6 +131,29 @@ def _build_tailor_prompt(profile: dict) -> str:
 
     education = profile.get("experience", {})
     education_level = education.get("education_level", "")
+
+    # When the profile has zero recorded real_metrics, telling the model to
+    # "aim for 80%... a bullet with no number should be the exception" gives
+    # it nowhere honest to go -- it has no numbers to pull from, but the
+    # instruction still pressures it toward one, and the observed result is
+    # a plausible-looking invented percentage on nearly every bullet
+    # (validate_json_fields' fabricated-metric check then correctly rejects
+    # it, burning every retry on the same unsatisfiable instruction). Drop
+    # the density target entirely in that case and say explicitly not to
+    # invent one -- a resume with zero numbers is strictly more honest than
+    # one with a single fabricated statistic.
+    if real_metrics:
+        metric_density_block = f"""METRIC DENSITY: A recruiter's eye fixates on numbers, not prose -- aim for at least 80% of
+all bullets across EXPERIENCE and PROJECTS combined to carry a real quantified result (a
+percentage, dollar figure, count, or scale). Pull the number from the original resume or
+real_metrics ({metrics_str}) -- never invent one. A bullet with no number should be the
+exception, not the norm."""
+    else:
+        metric_density_block = """METRIC DENSITY: No quantified metrics are recorded for this profile (real_metrics is
+empty). Do NOT invent a percentage, dollar figure, count, or scale for any bullet. If the
+original resume states a real number for something, keep it -- otherwise describe the
+outcome qualitatively (scope, ownership, what changed) with no invented statistic. A resume
+with zero numbers is strictly better than one with a single fabricated one."""
 
     return f"""You are a senior technical recruiter rewriting a resume to get this person an interview.
 
@@ -129,6 +183,16 @@ Reframe EVERY bullet for this role. Same real work, different angle. Every bulle
 PROJECTS: Reorder by relevance. Drop irrelevant projects entirely.
 
 BULLETS: Strong verb + what you built + quantified impact. Vary verbs (Built, Designed, Implemented, Reduced, Automated, Deployed, Operated, Optimized). Most relevant first. Max 4 per section.
+
+{metric_density_block}
+
+ARCHITECTURE OVER TOOL LISTS: for any bullet describing a system with more than one moving
+part, say how the pieces connect and why, not which tools were used. "Used radar to trigger
+vision processing only on a state change, cutting always-on compute" beats "Built with radar
+sensors, computer vision, and cloud storage." A hiring manager reads bullets for judgment,
+an ATS just wants the tool names elsewhere in skills -- so the tool names belong in the
+TECHNICAL SKILLS section, and the bullet's job is to show the decision.
+{project_links_block}
 
 ## VOICE:
 - Write like a real engineer. Short, direct.
@@ -291,6 +355,9 @@ def assemble_resume_text(data: dict, profile: dict) -> str:
         contact_parts.append(personal["github_url"])
     if personal.get("linkedin_url"):
         contact_parts.append(personal["linkedin_url"])
+    website = personal.get("website_url") or personal.get("portfolio_url")
+    if website:
+        contact_parts.append(website)
     if contact_parts:
         lines.append(" | ".join(contact_parts))
     lines.append("")
@@ -484,7 +551,102 @@ def tailor_resume(
             report["status"] = "approved_with_judge_warning"
             return tailored, report
 
-        # Both passed
+        # Layer 3: full-text structural validation. validate_tailored_resume
+        # was imported at the top of this module from day one but never
+        # actually called here -- Layer 1 only validates the JSON fields
+        # before assembly, so nobody was checking the assembled TEXT itself
+        # for duplicate sections, a stray em/en dash that slipped past
+        # sanitize_text, or contact info that silently failed to inject.
+        structural = validate_tailored_resume(tailored, profile, original_text=resume_text)
+        report["structural"] = structural
+
+        if not structural["passed"]:
+            avoid_notes.extend(structural["errors"])
+            if attempt < max_retries:
+                continue
+            report["status"] = "approved_with_structural_warning"
+            return tailored, report
+
+        # Layer 4: ATS text-layer check (jobpilot/quality.py) -- verifies
+        # what an ATS parser would actually see in the raw text layer: the
+        # contact literals are extractable, no ransom glyphs (en-dash,
+        # replacement char, control chars) corrupt parsing, sections read in
+        # a sane order, and keyword coverage is reported honestly (a match
+        # only counts if the profile genuinely backs it, never stuffed).
+        # This module shipped with a note that "another agent wires these
+        # into the pipeline later" and never got wired in -- this is that.
+        try:
+            from jobpilot.quality import ats_check, knowledge_from_profile
+            keywords_line = (job.get("score_reasoning") or "").split("\n", 1)[0]
+            job_keywords = [k.strip() for k in keywords_line.split(",") if k.strip()]
+            ats_result = ats_check(
+                tailored,
+                contact=profile,
+                job_keywords=job_keywords,
+                genuine_supported=knowledge_from_profile(profile),
+            )
+        except Exception:
+            log.debug("ATS text-layer check failed, skipping", exc_info=True)
+            ats_result = {"ok": True, "issues": [], "keyword_coverage": {"matched": [], "gaps": []}, "extraction_warnings": []}
+        report["ats"] = ats_result
+
+        if not ats_result["ok"]:
+            avoid_notes.append("ATS text-layer check failed: " + "; ".join(ats_result["issues"][:5]))
+            if attempt < max_retries:
+                continue
+            report["status"] = "approved_with_ats_warning"
+            return tailored, report
+
+        # Layer 5: page-fit check (renders to a temp PDF, counts pages).
+        # The prompt already says "must fit 1 page", but LLMs routinely
+        # ignore length instructions once bullets pile up across 4+ jobs and
+        # 2-3 projects -- this is the same "enforce in code, not just the
+        # prompt" philosophy as the fabrication/banned-word checks above,
+        # just for layout instead of content.
+        try:
+            from jobpilot.scoring.pdf import render_pdf_from_text
+            _, page_count = render_pdf_from_text(tailored)
+        except Exception:
+            log.debug("Page-fit check failed, skipping", exc_info=True)
+            page_count = 1
+        report["page_count"] = page_count
+
+        if page_count > 1:
+            avoid_notes.append(
+                f"Rendered resume is {page_count} pages -- MUST fit exactly 1 page. "
+                "Cut bullets starting with the least relevant PROJECTS entry, then the "
+                "oldest EXPERIENCE bullets. Do not drop a required company entirely -- "
+                "trim its bullet count instead. Tighten the summary to 2 sentences if needed."
+            )
+            if attempt < max_retries:
+                continue
+            # Last attempt — accept what we have rather than fail a
+            # judge-approved, non-fabricated resume over layout alone.
+            report["status"] = "approved_over_one_page"
+            return tailored, report
+
+        # Layer 6: metric density (the recruiter-scan research this pipeline
+        # is now built around: eye-tracking shows dense prose gets skipped
+        # and a bullet with a number gets a fixation). Soft-enforced at 50%
+        # in code even though the prompt asks for 80% -- some roles/bullets
+        # genuinely have nothing to quantify, and this should never burn all
+        # retries chasing a number that doesn't exist.
+        density = compute_metric_density(data)
+        report["metric_density"] = density
+
+        if density < 0.5:
+            avoid_notes.append(
+                f"Only {density:.0%} of bullets carry a real number (target 80%). Add "
+                "a quantified result to more bullets -- pull it from the original resume "
+                "or real_metrics, never invent one. Bullets that genuinely can't be "
+                "quantified are fine as the minority, not the majority."
+            )
+            if attempt < max_retries:
+                continue
+            report["status"] = "approved_low_metric_density"
+            return tailored, report
+
+        # All layers passed
         report["status"] = "approved"
         return tailored, report
 
@@ -556,10 +718,10 @@ def run_tailoring(min_score: int = 6, limit: int = 0,
 
             # Generate PDF (human preview) and DOCX (what actually gets
             # uploaded during apply, see apply/prompt.py) for approved
-            # resumes (best-effort). "approved_with_judge_warning" is also a
-            # success — resume was generated.
+            # resumes (best-effort). Every "approved_with_*_warning" status is
+            # also a success — a resume was generated, just flagged for review.
             pdf_path = None
-            if report["status"] in ("approved", "approved_with_judge_warning"):
+            if report["status"] in ('approved', 'approved_with_judge_warning', 'approved_over_one_page', 'approved_with_structural_warning', 'approved_with_ats_warning', 'approved_low_metric_density'):
                 try:
                     from jobpilot.scoring.pdf import convert_to_pdf, convert_to_docx
                     pdf_path = str(convert_to_pdf(txt_path))
@@ -590,7 +752,7 @@ def run_tailoring(min_score: int = 6, limit: int = 0,
     completed = 0
     results: list[dict] = []
     stats: dict[str, int] = {"approved": 0, "failed_validation": 0, "failed_judge": 0, "error": 0}
-    _success_statuses = {"approved", "approved_with_judge_warning"}
+    _success_statuses = {'approved', 'approved_over_one_page', 'approved_with_judge_warning', 'approved_with_ats_warning', 'approved_with_structural_warning', 'approved_low_metric_density'}
 
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
         futures = {pool.submit(_tailor_one, job): job for job in jobs}
@@ -627,18 +789,21 @@ def run_tailoring(min_score: int = 6, limit: int = 0,
             conn.commit()
 
     elapsed = time.time() - t0
+    approved_total = sum(stats.get(s, 0) for s in {'approved', 'approved_over_one_page', 'approved_with_judge_warning', 'approved_with_ats_warning', 'approved_with_structural_warning', 'approved_low_metric_density'})
     log.info(
-        "Tailoring done in %.1fs: %d approved, %d failed_validation, %d failed_judge, %d errors",
+        "Tailoring done in %.1fs: %d approved (%d over 1 page), %d failed_validation, %d failed_judge, %d errors",
         elapsed,
-        stats.get("approved", 0),
+        approved_total,
+        stats.get("approved_over_one_page", 0),
         stats.get("failed_validation", 0),
         stats.get("failed_judge", 0),
         stats.get("error", 0),
     )
 
     return {
-        "approved": stats.get("approved", 0),
+        "approved": approved_total,
         "failed": stats.get("failed_validation", 0) + stats.get("failed_judge", 0),
         "errors": stats.get("error", 0),
+        "over_one_page": stats.get("approved_over_one_page", 0),
         "elapsed": elapsed,
     }

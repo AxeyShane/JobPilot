@@ -11,6 +11,21 @@ from jobpilot.config import TAILORED_DIR
 
 log = logging.getLogger(__name__)
 
+import re as _re
+
+_BOLD_RE = _re.compile(r"\*\*(.+?)\*\*")
+
+
+def _md_bold(text: str) -> str:
+    """Convert **bold** markdown spans to <b>...</b>.
+
+    Only the interview-stage resume (scoring/interview_resume.py) ever emits
+    "**" -- the ATS prompt is instructed never to use markdown -- so this is a
+    no-op on ordinary ATS-tailored resumes and safe to apply unconditionally
+    everywhere resume text is dropped into the HTML template.
+    """
+    return _BOLD_RE.sub(r"<b>\1</b>", text or "")
+
 
 # ── Resume Parser ────────────────────────────────────────────────────────
 
@@ -174,7 +189,7 @@ def build_html(resume: dict) -> str:
         entries = parse_entries(sections["EXPERIENCE"])
         items = ""
         for e in entries:
-            bullets = "".join(f"<li>{b}</li>" for b in e["bullets"])
+            bullets = "".join(f"<li>{_md_bold(b)}</li>" for b in e["bullets"])
             subtitle = f'<div class="entry-subtitle">{e["subtitle"]}</div>' if e["subtitle"] else ""
             items += f'<div class="entry"><div class="entry-title">{e["title"]}</div>{subtitle}<ul>{bullets}</ul></div>'
         exp_html = f'<div class="section"><div class="section-title">Experience</div>{items}</div>'
@@ -185,7 +200,7 @@ def build_html(resume: dict) -> str:
         entries = parse_entries(sections["PROJECTS"])
         items = ""
         for e in entries:
-            bullets = "".join(f"<li>{b}</li>" for b in e["bullets"])
+            bullets = "".join(f"<li>{_md_bold(b)}</li>" for b in e["bullets"])
             subtitle = f'<div class="entry-subtitle">{e["subtitle"]}</div>' if e["subtitle"] else ""
             items += f'<div class="entry"><div class="entry-title">{e["title"]}</div>{subtitle}<ul>{bullets}</ul></div>'
         proj_html = f'<div class="section"><div class="section-title">Projects</div>{items}</div>'
@@ -199,7 +214,17 @@ def build_html(resume: dict) -> str:
     # Summary
     summary_html = ""
     if "SUMMARY" in sections:
-        summary_html = f'<div class="section"><div class="section-title">Summary</div><div class="summary">{sections["SUMMARY"].strip()}</div></div>'
+        summary_html = f'<div class="section"><div class="section-title">Summary</div><div class="summary">{_md_bold(sections["SUMMARY"].strip())}</div></div>'
+
+    # Positioning -- interview-stage resumes only (scoring/interview_resume.py).
+    # This is the top-band line an F-pattern reader is guaranteed to read in
+    # full, so it renders above the summary, visually distinct (larger,
+    # accent color) rather than as just another section.
+    positioning_html = ""
+    if "POSITIONING" in sections:
+        positioning_html = (
+            f'<div class="positioning">{_md_bold(sections["POSITIONING"].strip())}</div>'
+        )
 
     # Contact line parsing
     contact = resume["contact"]
@@ -313,6 +338,17 @@ li {{
 .edu {{
     font-size: 10pt;
 }}
+.positioning {{
+    font-size: 10.5pt;
+    font-weight: 600;
+    font-style: italic;
+    color: #1a3a5c;
+    text-align: center;
+    margin: 4px 0 2px 0;
+}}
+b {{
+    color: #16324f;
+}}
 </style>
 </head>
 <body>
@@ -322,6 +358,7 @@ li {{
     {location_html}
     <div class="contact">{contact_html}</div>
 </div>
+{positioning_html}
 {summary_html}
 {skills_html}
 {exp_html}
@@ -371,10 +408,28 @@ def render_docx(resume: dict, output_path: str) -> None:
         run.font.size = Pt(size)
         run.font.color.rgb = HEADING_COLOR
 
+    def add_runs_with_bold(paragraph, text: str, size: int = 10) -> None:
+        """Split text on **bold** markers into separate runs.
+
+        Only interview-stage resumes (scoring/interview_resume.py) ever emit
+        "**" -- a no-op split on ordinary ATS-tailored text, which never
+        contains it.
+        """
+        pos = 0
+        for m in _BOLD_RE.finditer(text):
+            if m.start() > pos:
+                paragraph.add_run(text[pos:m.start()]).font.size = Pt(size)
+            run = paragraph.add_run(m.group(1))
+            run.bold = True
+            run.font.size = Pt(size)
+            pos = m.end()
+        if pos < len(text):
+            paragraph.add_run(text[pos:]).font.size = Pt(size)
+
     def bullet(text: str) -> None:
         p = doc.add_paragraph(style="List Bullet")
         p.paragraph_format.space_after = Pt(0)
-        p.add_run(text).font.size = Pt(10)
+        add_runs_with_bold(p, text, size=10)
 
     # Header
     name_p = doc.add_paragraph()
@@ -400,9 +455,18 @@ def render_docx(resume: dict, output_path: str) -> None:
 
     sections = resume["sections"]
 
+    if "POSITIONING" in sections:
+        pos_p = doc.add_paragraph()
+        pos_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        pos_run = pos_p.add_run(sections["POSITIONING"].strip().replace("**", ""))
+        pos_run.italic = True
+        pos_run.bold = True
+        pos_run.font.size = Pt(10.5)
+        pos_run.font.color.rgb = HEADING_COLOR
+
     if "SUMMARY" in sections:
         heading("Summary")
-        doc.add_paragraph(sections["SUMMARY"].strip())
+        add_runs_with_bold(doc.add_paragraph(), sections["SUMMARY"].strip())
 
     if "TECHNICAL SKILLS" in sections:
         heading("Technical Skills")
@@ -459,6 +523,62 @@ def render_pdf(html: str, output_path: str) -> None:
             print_background=True,
         )
         browser.close()
+
+
+def count_pdf_pages(pdf_path: str) -> int:
+    """Count pages in a rendered PDF.
+
+    Used by the tailoring retry loop (see scoring/tailor.py) to enforce the
+    "must fit 1 page" instruction in code, the same way fabrication and
+    banned words are enforced in code rather than trusted to the prompt --
+    LLMs routinely ignore length instructions once bullets pile up, so this
+    catches a resume that silently spilled to page 2 with nobody the wiser.
+
+    Args:
+        pdf_path: Path to a PDF file on disk.
+
+    Returns:
+        Number of pages. Returns 1 (fail open) if the PDF can't be parsed,
+        since a page-count check should never block an otherwise-good resume
+        over a corrupt read.
+    """
+    try:
+        from pypdf import PdfReader
+        return len(PdfReader(pdf_path).pages)
+    except Exception:
+        log.debug("Page count failed for %s, assuming 1 page", pdf_path, exc_info=True)
+        return 1
+
+
+def render_pdf_from_text(text: str) -> tuple[str, int]:
+    """Render tailored resume text to a temp PDF and return (html, page_count).
+
+    Thin convenience wrapper combining parse_resume -> build_html -> render_pdf
+    -> count_pdf_pages, used by the tailoring retry loop to check page-fit
+    without leaving a permanent file behind for every retry attempt.
+
+    Args:
+        text: Assembled resume text (see tailor.assemble_resume_text).
+
+    Returns:
+        (html, page_count)
+    """
+    import tempfile
+    import os as _os
+
+    resume = parse_resume(text)
+    html = build_html(resume)
+    fd, tmp_path = tempfile.mkstemp(suffix=".pdf")
+    _os.close(fd)
+    try:
+        render_pdf(html, tmp_path)
+        pages = count_pdf_pages(tmp_path)
+    finally:
+        try:
+            _os.unlink(tmp_path)
+        except OSError:
+            pass
+    return html, pages
 
 
 # ── Public API ───────────────────────────────────────────────────────────

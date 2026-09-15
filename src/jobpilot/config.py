@@ -100,6 +100,11 @@ ENV_PATH = APP_DIR / ".env"
 # Generated output
 TAILORED_DIR = APP_DIR / "tailored_resumes"
 COVER_LETTER_DIR = APP_DIR / "cover_letters"
+# Post-interview CVs: written for a human reading in an F-pattern, not an ATS
+# parser (see scoring/interview_resume.py). Kept separate from TAILORED_DIR so
+# the ATS-optimized application copy and the interview-stage copy never get
+# confused for one another on disk.
+INTERVIEW_DIR = APP_DIR / "interview_resumes"
 LOG_DIR = APP_DIR / "logs"
 
 # Chrome worker isolation
@@ -213,7 +218,7 @@ def get_chrome_user_data() -> Path:
 
 def ensure_dirs():
     """Create all required directories."""
-    for d in [APP_DIR, TAILORED_DIR, COVER_LETTER_DIR, LOG_DIR, CHROME_WORKER_DIR, APPLY_WORKER_DIR]:
+    for d in [APP_DIR, TAILORED_DIR, COVER_LETTER_DIR, INTERVIEW_DIR, LOG_DIR, CHROME_WORKER_DIR, APPLY_WORKER_DIR]:
         d.mkdir(parents=True, exist_ok=True)
 
 

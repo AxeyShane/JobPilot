@@ -340,6 +340,8 @@ def create_app() -> Flask:
     cfg.load_env()
     cfg.ensure_dirs()
     init_db()
+    from jobpilot.outcomes import init_outcomes
+    init_outcomes(get_connection())
 
     # -- pages --
 
@@ -359,7 +361,10 @@ def create_app() -> Flask:
         limit = request.args.get("limit", default=1000, type=int)
         location = request.args.get("location", default="").strip()
         conn = get_connection()
-        where = "1=1"
+        # Scam-blocked jobs belong on the Safety tab (/api/jobs/flagged), and
+        # expired jobs belong on the Expired tab -- neither mixes into the
+        # main list.
+        where = "(scam_verdict IS NULL OR scam_verdict != 'blocked') AND (apply_status IS NULL OR apply_status != 'expired')"
         params: list = []
         if min_score is not None:
             # Only real matches: exclude unscored (fit_score IS NULL) rows —
@@ -376,12 +381,15 @@ def create_app() -> Flask:
                 where += " AND (" + " OR ".join(["location LIKE ?"] * len(terms)) + ")"
                 params.extend(f"%{t}%" for t in terms)
         rows = conn.execute(
-            f"""SELECT url, title, site, location, fit_score, score_reasoning,
+            f"""SELECT jobs.url AS url, title, site, location, fit_score, score_reasoning,
                        tailored_resume_path, cover_letter_path, applied_at,
                        apply_status, apply_error, application_url,
-                       scam_verdict, scam_reasons, scam_checked_at
-                FROM jobs WHERE {where}
-                ORDER BY fit_score DESC, discovered_at DESC LIMIT ?""",
+                       scam_verdict, scam_reasons, scam_checked_at,
+                       applicant_count, competitiveness_verdict, competitiveness_reason,
+                       outcomes.status AS outcome_status
+                FROM jobs LEFT JOIN outcomes ON outcomes.url = jobs.url
+                WHERE {where}
+                ORDER BY discovered_at DESC LIMIT ?""",
             params + [limit],
         ).fetchall()
         return jsonify([dict(r) for r in rows])
@@ -397,10 +405,39 @@ def create_app() -> Flask:
                       apply_status, apply_error, application_url,
                       scam_verdict, scam_reasons, scam_checked_at
                FROM jobs WHERE scam_verdict = 'blocked'
+                 AND (apply_status IS NULL OR apply_status != 'expired')
                ORDER BY scam_checked_at DESC, discovered_at DESC LIMIT ?""",
             (limit,),
         ).fetchall()
         return jsonify([dict(r) for r in rows])
+
+    @app.get("/api/jobs/expired")
+    def api_expired_jobs():
+        """Jobs the user manually marked expired -- from either My Jobs or
+        the Safety tab. Kept out of both once flagged here."""
+        limit = request.args.get("limit", default=200, type=int)
+        conn = get_connection()
+        rows = conn.execute(
+            """SELECT url, title, site, location, fit_score, score_reasoning,
+                      application_url, scam_verdict, scam_reasons, discovered_at
+               FROM jobs WHERE apply_status = 'expired'
+               ORDER BY discovered_at DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return jsonify([dict(r) for r in rows])
+
+    @app.post("/api/jobs/expire")
+    def api_expire_job():
+        """Manually mark a posting expired/gone -- removes it from My Jobs
+        and Safety alike, moving it to the Expired tab."""
+        data = request.get_json(force=True) or {}
+        url = data.get("url")
+        if not url:
+            return jsonify({"error": "url is required"}), 400
+        conn = get_connection()
+        conn.execute("UPDATE jobs SET apply_status = 'expired' WHERE url = ?", (url,))
+        conn.commit()
+        return jsonify({"ok": True})
 
     @app.post("/api/jobs/report-scam")
     @app.post("/api/scam/report")
@@ -434,6 +471,40 @@ def create_app() -> Flask:
         conn.commit()
         return jsonify({"ok": True})
 
+    @app.get("/api/jobs/retired")
+    def api_retired_jobs():
+        """Jobs the competitiveness gate retired -- already too many applicants
+        by the time this pipeline reached them (see competitiveness_gate.py)."""
+        limit = request.args.get("limit", default=100, type=int)
+        conn = get_connection()
+        rows = conn.execute(
+            """SELECT url, title, site, location, fit_score, application_url,
+                      applicant_count, applicant_checked_at,
+                      competitiveness_verdict, competitiveness_reason
+               FROM jobs WHERE competitiveness_verdict = 'retired'
+               ORDER BY applicant_checked_at DESC, discovered_at DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return jsonify([dict(r) for r in rows])
+
+    @app.post("/api/jobs/unretire")
+    def api_unretire_job():
+        """Manually override a competitiveness-gate retirement for one job --
+        puts it back in the tailor/cover/apply queues."""
+        data = request.get_json(force=True) or {}
+        url = data.get("url")
+        if not url:
+            return jsonify({"error": "url is required"}), 400
+        conn = get_connection()
+        conn.execute(
+            "UPDATE jobs SET competitiveness_verdict = 'ok', "
+            "apply_status = CASE WHEN apply_status = 'retired' THEN NULL ELSE apply_status END "
+            "WHERE url = ?",
+            (url,),
+        )
+        conn.commit()
+        return jsonify({"ok": True})
+
     @app.post("/api/jobs/mark")
     def api_mark_job():
         data = request.get_json(force=True)
@@ -462,6 +533,65 @@ def create_app() -> Flask:
             return jsonify({"error": "no file for this job"}), 404
         resolved = Path(path).with_suffix(f".{fmt}").resolve()
         if cfg.APP_DIR.resolve() not in resolved.parents or not resolved.is_file():
+            return jsonify({"error": "file not found"}), 404
+        return send_file(resolved, as_attachment=False)
+
+    # -- outcomes / interview CV --
+
+    @app.get("/api/jobs/outcome")
+    def api_get_outcome():
+        from jobpilot.outcomes import get_outcome
+        url = request.args.get("url", "")
+        if not url:
+            return jsonify({"error": "url is required"}), 400
+        return jsonify(get_outcome(get_connection(), url) or {})
+
+    @app.post("/api/jobs/outcome")
+    def api_record_outcome():
+        from jobpilot.outcomes import record_outcome_and_notify
+        data = request.get_json(force=True) or {}
+        url = data.get("url")
+        status = data.get("status")
+        if not url or not status:
+            return jsonify({"error": "url and status are required"}), 400
+        result = record_outcome_and_notify(
+            get_connection(), url, status=status, note=data.get("note"), source=data.get("source", "manual"),
+        )
+        return jsonify(result)
+
+    @app.get("/api/jobs/interview-cv/status")
+    def api_interview_cv_status():
+        from jobpilot.scoring.interview_resume import get_interview_cv_status
+        url = request.args.get("url", "")
+        if not url:
+            return jsonify({"error": "url is required"}), 400
+        return jsonify(get_interview_cv_status(url, conn=get_connection()))
+
+    @app.post("/api/jobs/interview-cv")
+    def api_generate_interview_cv():
+        from jobpilot.scoring.interview_resume import generate_interview_cv
+        data = request.get_json(force=True) or {}
+        url = data.get("url")
+        if not url:
+            return jsonify({"error": "url is required"}), 400
+        result = generate_interview_cv(url, interview_context=data.get("notes", ""), conn=get_connection())
+        return jsonify(result)
+
+    @app.get("/api/jobs/interview-cv/file")
+    def api_interview_cv_file():
+        from flask import send_file
+        from jobpilot.scoring.interview_resume import _prefix_for_job
+
+        url = request.args.get("url", "")
+        fmt = request.args.get("format", "pdf")
+        if not url or fmt not in ("txt", "pdf", "docx"):
+            return jsonify({"error": "url and format(txt|pdf|docx) required"}), 400
+        row = get_connection().execute("SELECT title, site FROM jobs WHERE url = ?", (url,)).fetchone()
+        if row is None:
+            return jsonify({"error": "job not found"}), 404
+        prefix = _prefix_for_job(dict(row))
+        resolved = (cfg.INTERVIEW_DIR / f"{prefix}.{fmt}").resolve()
+        if cfg.INTERVIEW_DIR.resolve() not in resolved.parents or not resolved.is_file():
             return jsonify({"error": "file not found"}), 404
         return send_file(resolved, as_attachment=False)
 
@@ -854,6 +984,9 @@ def create_app() -> Flask:
             ).fetchone()[0],
             "scam_blocked": conn.execute(
                 "SELECT COUNT(*) FROM jobs WHERE scam_verdict = 'blocked'"
+            ).fetchone()[0],
+            "retired_saturated": conn.execute(
+                "SELECT COUNT(*) FROM jobs WHERE competitiveness_verdict = 'retired'"
             ).fetchone()[0],
             # Mirrors api_queue()/launcher.acquire_job() eligibility. There is no
             # failed_at column -- failure lives in apply_status/apply_attempts.
@@ -1805,6 +1938,7 @@ PAGE_HTML = r"""<!DOCTYPE html>
       <button data-tab="home" class="active" onclick="switchTab('home')">🏠 Home</button>
       <button data-tab="jobs" onclick="switchTab('jobs')">💼 My Jobs</button>
       <button data-tab="safety" onclick="switchTab('safety')">🛡️ Safety</button>
+      <button data-tab="expired" onclick="switchTab('expired')">⏰ Expired</button>
       <button data-tab="settings" onclick="switchTab('settings')">⚙️ Settings</button>
     </nav>
 
@@ -2021,6 +2155,32 @@ PAGE_HTML = r"""<!DOCTYPE html>
     <!-- Flagged Jobs List Container -->
     <div id="safety-jobs-container" class="job-list">
       <!-- Flagged jobs will be rendered here dynamically -->
+    </div>
+
+  </section>
+
+
+  <!-- ================= TAB: EXPIRED ================= -->
+  <section id="tab-expired" class="tab-pane">
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">⏰ Expired Postings</span>
+        <button class="btn btn-secondary btn-sm" onclick="loadExpiredJobs()">
+          🔄 Refresh
+        </button>
+      </div>
+      <p class="card-sub" style="margin-bottom:0.25rem;">
+        Jobs you manually marked expired or gone, from My Jobs or Safety. Kept out of both lists.
+      </p>
+    </div>
+
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem;padding:0 0.25rem;">
+      <span id="expired-count-text" style="font-size:0.9rem;font-weight:600;color:var(--text-muted);">Loading expired jobs...</span>
+    </div>
+
+    <div id="expired-jobs-container" class="job-list">
+      <!-- Expired jobs will be rendered here dynamically -->
     </div>
 
   </section>
@@ -2349,6 +2509,7 @@ function switchTab(tabName) {
   if (tabName === 'home') loadHome();
   if (tabName === 'jobs') loadJobs();
   if (tabName === 'safety') loadSafetyJobs();
+  if (tabName === 'expired') loadExpiredJobs();
   if (tabName === 'settings') loadSettings();
 }
 
@@ -2709,7 +2870,7 @@ function filterJobsClientSide() {
     return;
   }
 
-  container.innerHTML = filtered.map(j => {
+  container.innerHTML = filtered.map((j, idx) => {
     const score = j.fit_score != null ? j.fit_score : null;
     let matchBadgeHtml = '<span class="match-badge match-fair">Unrated</span>';
     if (score != null) {
@@ -2733,6 +2894,20 @@ function filterJobsClientSide() {
     } else if (j.tailored_resume_path && j.cover_letter_path) {
       statusHtml = '<span class="job-pill" style="background:var(--primary-light);color:var(--primary);">📝 Ready to Apply</span>';
     }
+
+    // Real application outcome (interview/offer/rejected/...), separate from
+    // the pipeline-stage pill above -- tracked in the outcomes table via
+    // `jobpilot outcome` / the "Record Outcome" button below.
+    const OUTCOME_PILLS = {
+      interview: ['🎯 Interview', '#dbeafe', '#1e40af'], assessment: ['📋 Assessment', '#fef9c3', '#854d0e'],
+      offer: ['🎉 Offer', '#dcfce7', '#166534'], accepted: ['✅ Accepted', '#dcfce7', '#166534'],
+      rejected: ['❌ Rejected', '#fee2e2', '#991b1b'], no_response: ['🔇 No Response', '#f3f4f6', '#6b7280'],
+      closed: ['🔒 Closed', '#f3f4f6', '#6b7280'], offer_declined: ['🙅 Declined', '#f3f4f6', '#6b7280'],
+      waiting: ['⏳ Waiting on Them', '#fef9c3', '#854d0e'], drafted: ['✏️ Drafted', '#f3f4f6', '#6b7280'],
+    };
+    const outcomePill = OUTCOME_PILLS[j.outcome_status];
+    const outcomeHtml = outcomePill
+      ? `<span class="job-pill" style="background:${outcomePill[1]};color:${outcomePill[2]};font-weight:600;">${outcomePill[0]}</span>` : '';
 
     // Scam warning banner on card
     const scamWarningBanner = isBlocked ? `
@@ -2771,6 +2946,9 @@ function filterJobsClientSide() {
         <button class="btn btn-secondary btn-sm" style="color:var(--danger);" onclick="reportScamPrompt('${safeUrl}', '${escapeHtml(safeTitle)}')">
           🚩 Report as Scam
         </button>
+        <button class="btn btn-secondary btn-sm" style="color:var(--text-muted);" onclick="markExpired('${safeUrl}')">
+          ⏰ Mark Expired
+        </button>
       `;
     } else {
       actionButtons = `
@@ -2783,8 +2961,24 @@ function filterJobsClientSide() {
         <button class="btn btn-secondary btn-sm" style="color:var(--text-muted);" title="Report suspicious posting" onclick="reportScamPrompt('${safeUrl}', '${escapeHtml(safeTitle)}')">
           🚩 Report Scam
         </button>
+        <button class="btn btn-secondary btn-sm" style="color:var(--text-muted);" onclick="markExpired('${safeUrl}')">
+          ⏰ Mark Expired
+        </button>
       `;
     }
+    actionButtons += `
+        <button class="btn btn-secondary btn-sm" onclick="recordOutcomePrompt('${safeUrl}', '${escapeHtml(safeTitle)}')">
+          🎯 Record Outcome
+        </button>
+    `;
+
+    // Interview-stage CV: filled in async after render (see
+    // loadInterviewCvSections) so the main job list stays one query -- only
+    // jobs already marked "interview" get the extra per-job lookup.
+    const interviewCvId = `interview-cv-${idx}`;
+    const interviewCvHtml = j.outcome_status === 'interview' ? `
+      <div id="${interviewCvId}" class="job-interview-cv" data-url="${escapeHtml(j.url)}">Loading interview CV status...</div>
+    ` : '';
 
     return `
       <div class="job-item"${isBlocked ? ' style="border-color:#fecaca;"' : ''}>
@@ -2795,6 +2989,7 @@ function filterJobsClientSide() {
               <span class="job-pill">${escapeHtml(j.site || 'Direct')}</span>
               <span>📍 ${escapeHtml(j.location || 'Location Not Specified')}</span>
               ${statusHtml}
+              ${outcomeHtml}
             </div>
           </div>
           <div>${matchBadgeHtml}</div>
@@ -2803,6 +2998,8 @@ function filterJobsClientSide() {
         ${scamWarningBanner}
 
         ${j.score_reasoning ? `<div class="job-reason">${escapeHtml(j.score_reasoning)}</div>` : ''}
+
+        ${interviewCvHtml}
 
         <div class="job-bottom">
           <div class="job-docs">
@@ -2815,6 +3012,98 @@ function filterJobsClientSide() {
       </div>
     `;
   }).join('');
+
+  loadInterviewCvSections();
+}
+
+async function loadInterviewCvSections() {
+  for (const el of document.querySelectorAll('.job-interview-cv')) {
+    const url = el.dataset.url;
+    try {
+      const res = await fetch(`/api/jobs/interview-cv/status?url=${encodeURIComponent(url)}`);
+      const data = await res.json();
+      renderInterviewCvSection(el, url, data);
+    } catch (e) {
+      el.innerHTML = '<span style="color:var(--text-faint);">Could not load interview CV status.</span>';
+    }
+  }
+}
+
+function renderInterviewCvSection(el, url, data) {
+  const encUrl = encodeURIComponent(url);
+  if (!data.exists) {
+    el.innerHTML = `
+      <span style="color:var(--text-faint);">No interview CV yet.</span>
+      <button class="btn btn-secondary btn-sm" onclick="generateInterviewCv('${url.replace(/'/g, "\\'")}', this)">🎯 Generate Interview CV</button>
+    `;
+  } else if (data.clean) {
+    el.innerHTML = `
+      <span>Interview CV:</span>
+      <a class="doc-btn" href="/api/jobs/interview-cv/file?format=pdf&url=${encUrl}" target="_blank">PDF</a>
+      <a class="doc-btn" href="/api/jobs/interview-cv/file?format=docx&url=${encUrl}" target="_blank">DOCX</a>
+      <a class="doc-btn" href="/api/jobs/interview-cv/file?format=txt&url=${encUrl}" target="_blank">TXT</a>
+      <button class="btn btn-secondary btn-sm" onclick="generateInterviewCv('${url.replace(/'/g, "\\'")}', this)">🔄 Regenerate</button>
+    `;
+  } else {
+    el.innerHTML = `
+      <span style="color:var(--danger);">⚠️ Last attempt (${escapeHtml(data.status || 'unknown')}) needs review -- not downloadable as-is.</span>
+      <button class="btn btn-secondary btn-sm" onclick="generateInterviewCv('${url.replace(/'/g, "\\'")}', this)">🔄 Retry</button>
+    `;
+  }
+}
+
+async function generateInterviewCv(url, btn) {
+  const el = btn.closest('.job-interview-cv');
+  const notes = prompt('What do you already know about this interview? (what landed, feedback, round number -- optional)', '') || '';
+  el.innerHTML = '<span style="color:var(--text-faint);">Generating interview CV (this calls the LLM, may take ~30s)...</span>';
+  try {
+    const res = await fetch('/api/jobs/interview-cv', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, notes })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      showToast('Interview CV ready.');
+      renderInterviewCvSection(el, url, { exists: true, clean: true, pdf: !!data.pdf_path, docx: !!data.docx_path });
+    } else {
+      showToast('Interview CV needs review: ' + (data.status || data.error || 'unknown issue'));
+      renderInterviewCvSection(el, url, { exists: true, clean: false, status: data.status });
+    }
+  } catch (e) {
+    console.error('generateInterviewCv error:', e);
+    el.innerHTML = '<span style="color:var(--danger);">Failed to generate interview CV.</span>';
+  }
+}
+
+async function recordOutcomePrompt(url, title) {
+  const status = prompt(
+    `Record outcome for "${title}":\nOne of: applied, waiting, interview, assessment, offer, accepted, rejected, no response, offer declined, closed`,
+    'interview'
+  );
+  if (!status || !status.trim()) return;
+  const note = prompt('Optional note (what happened, feedback, round number):', '') || '';
+  try {
+    const res = await fetch('/api/jobs/outcome', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, status: status.trim(), note })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      let msg = `Outcome recorded: ${data.outcome.status}`;
+      if (data.interview_cv) {
+        msg += data.interview_cv.ok ? ' -- interview CV ready.' : ` -- interview CV needs review (${data.interview_cv.status || data.interview_cv.error}).`;
+      }
+      showToast(msg);
+      await loadJobs();
+    } else {
+      alert('Could not record outcome: ' + (data.error || 'Unknown error'));
+    }
+  } catch (e) {
+    console.error('recordOutcome error:', e);
+    alert('Failed to record outcome.');
+  }
 }
 
 async function markJob(url, status) {
@@ -2831,29 +3120,54 @@ async function markJob(url, status) {
   }
 }
 
+async function markExpired(url) {
+  try {
+    await fetch('/api/jobs/expire', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url })
+    });
+    showToast('Marked expired and moved to the Expired tab.');
+    await loadJobs();
+    if ($('tab-safety') && $('tab-safety').classList.contains('active')) {
+      await loadSafetyJobs();
+    }
+    if ($('tab-expired') && $('tab-expired').classList.contains('active')) {
+      await loadExpiredJobs();
+    }
+    loadHome();
+  } catch (e) {
+    console.error('markExpired error:', e);
+  }
+}
+
 async function reportScamPrompt(url, title) {
-  const note = prompt(`Report "${title || 'this job'}" as a scam?\n\nThis will immediately block the job and remember its signature.\n\nOptional: Add a brief note (e.g. asked for fee, bank account, fake recruiter):`, '');
-  if (note === null) return;
+  // True single-click flag: no blocking prompt() dialog. If JobPilot's own
+  // gate missed a scam posting, the user should be able to correct it in
+  // one click -- the note field was optional to begin with (defaults to ""
+  // server-side), so there was nothing the dialog was actually gating
+  // except an extra click. Misflags are recoverable via the "Clear Flag"
+  // button that appears on a blocked job, so no confirm step either.
   try {
     const res = await fetch('/api/jobs/report-scam', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, note: note.trim() })
+      body: JSON.stringify({ url, note: '' })
     });
     const data = await res.json();
     if (res.ok) {
-      showToast('Reported as scam and blocked.');
+      showToast('Flagged as scam and blocked. Undo with "Clear Flag" if that was a mistake.');
       await loadJobs();
       if ($('tab-safety') && $('tab-safety').classList.contains('active')) {
         await loadSafetyJobs();
       }
       loadHome();
     } else {
-      alert('Could not report job: ' + (data.error || 'Unknown error'));
+      alert('Could not flag job: ' + (data.error || 'Unknown error'));
     }
   } catch (e) {
     console.error('reportScam error:', e);
-    alert('Failed to report scam.');
+    alert('Failed to flag scam.');
   }
 }
 
@@ -2979,6 +3293,9 @@ function renderSafetyJobs() {
             <button class="btn btn-secondary btn-sm" style="color:var(--success);font-weight:600;" onclick="clearScamFlag('${safeUrl}')">
               ✅ Clear Flag (Mark Safe)
             </button>
+            <button class="btn btn-secondary btn-sm" style="color:var(--text-muted);" onclick="markExpired('${safeUrl}')">
+              ⏰ Mark Expired
+            </button>
           </div>
         </div>
       </div>
@@ -2991,6 +3308,74 @@ function escapeHtml(text) {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
+}
+
+let _allExpiredJobs = [];
+
+async function loadExpiredJobs() {
+  const countText = $('expired-count-text');
+  if (countText) countText.textContent = 'Loading expired jobs...';
+  const container = $('expired-jobs-container');
+  if (!container) return;
+
+  try {
+    const res = await fetch('/api/jobs/expired');
+    const jobs = await res.json();
+    _allExpiredJobs = jobs || [];
+    renderExpiredJobs();
+  } catch (e) {
+    console.error('loadExpiredJobs error:', e);
+    if (container) {
+      container.innerHTML = '<div class="empty-state"><div class="empty-title">Could not load expired jobs</div><div class="empty-desc">Check that the assistant is connected.</div></div>';
+    }
+  }
+}
+
+function renderExpiredJobs() {
+  const container = $('expired-jobs-container');
+  const countText = $('expired-count-text');
+  if (!container) return;
+
+  const jobs = _allExpiredJobs;
+  if (countText) {
+    countText.textContent = `${jobs.length} expired ${jobs.length === 1 ? 'posting' : 'postings'}`;
+  }
+
+  if (!jobs.length) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">⏰</div>
+        <div class="empty-title">Nothing expired yet</div>
+        <div class="empty-desc">Postings you mark expired from My Jobs or Safety show up here.</div>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = jobs.map(j => {
+    const score = j.fit_score != null ? j.fit_score : null;
+    const matchBadgeHtml = score != null ? `<span class="match-badge match-fair">Match: ${score}/10</span>` : '';
+    const wasScam = j.scam_verdict === 'blocked';
+    const jobUrl = j.application_url || j.url;
+
+    return `
+      <div class="job-item" style="opacity:0.75;">
+        <div class="job-top">
+          <div style="flex:1;min-width:0;">
+            <a href="${jobUrl}" target="_blank" rel="noopener" class="job-title-link">${escapeHtml(j.title || 'Untitled Job')}</a>
+            <div class="job-meta">
+              <span class="job-pill">⏰ Expired</span>
+              ${wasScam ? '<span class="job-pill" style="background:#fee2e2;color:#991b1b;">⚠️ Was flagged as scam</span>' : ''}
+              <span class="job-pill">${escapeHtml(j.site || 'Direct')}</span>
+              <span>📍 ${escapeHtml(j.location || 'Location Not Specified')}</span>
+            </div>
+          </div>
+          <div>${matchBadgeHtml}</div>
+        </div>
+        ${j.score_reasoning ? `<div class="job-reason">${escapeHtml(j.score_reasoning)}</div>` : ''}
+      </div>
+    `;
+  }).join('');
 }
 
 // ---------------------------------------------------------------------------

@@ -166,23 +166,42 @@ def validate_json_fields(
     errors: list[str] = []
     warnings: list[str] = []
 
-    # Required keys — always checked regardless of mode
-    for key in ("title", "summary", "skills", "experience", "projects", "education"):
+    # Required keys — always checked regardless of mode.
+    # "projects" is checked for PRESENCE only, not truthiness: the tailor
+    # prompt explicitly tells the model "Only PROJECTS may be dropped
+    # entirely for irrelevance", so a job with no relevant projects legitimately
+    # produces `"projects": []`. Treating that empty-but-present list as a
+    # missing field was rejecting an intentional, correct output and burning
+    # a retry the model had no way to satisfy (there is nothing to add back
+    # without fabricating one) -- discovered while building the interview-CV
+    # generator, which hit this on a resume with no projects worth listing.
+    for key in ("title", "summary", "skills", "experience", "education"):
         if key not in data or not data[key]:
             errors.append(f"Missing required field: {key}")
+    if "projects" not in data or not isinstance(data["projects"], list):
+        errors.append("Missing required field: projects")
     if errors:
         return {"passed": False, "errors": errors, "warnings": warnings}
 
     # Collect all text for bulk checks
     all_text_parts: list[str] = [data["summary"]]
 
-    # Skills: check for fabrication (always enforced)
+    # Skills: check for fabrication (always enforced).
+    # FABRICATION_WATCHLIST is a blanket "zero relation to the candidate's
+    # stack" list, but it's static and can genuinely collide with someone's
+    # real, profile-declared skills (e.g. a candidate whose skills_boundary
+    # legitimately includes Django or Rust) -- this was flagging those as
+    # fabrication every single time regardless of what the profile actually
+    # says, discovered while building the interview-CV generator against a
+    # profile with "Django" as a real, listed framework. A watchlist term is
+    # only real fabrication if the user's own profile doesn't claim it.
+    allowed_skills = _build_skills_set(profile)
     if isinstance(data["skills"], dict):
         skills_text = " ".join(str(v) for v in data["skills"].values()).lower()
         for fake in FABRICATION_WATCHLIST:
             if len(fake) <= 2:
                 continue
-            if fake in skills_text:
+            if fake in skills_text and fake not in allowed_skills:
                 errors.append(f"Fabricated skill: '{fake}'")
 
     # Experience: preserved companies must be present (always enforced)

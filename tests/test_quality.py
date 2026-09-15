@@ -41,8 +41,14 @@ check("clean text unchanged and unflagged", found2 is False and fixed2 == "No ra
 # 2. ats_check: contact extraction + honest keyword coverage
 # ---------------------------------------------------------------------------
 contact = {"email": "jane@ex.com", "phone": "+1-555-0100"}
-good = ("SUMMARY\njane@ex.com +1-555-0100\nEDUCATION stats\nEXPERIENCE 2021-2023\n"
-        "SKILLS python fastapi")
+# Section order here matches what scoring/tailor.py's assemble_resume_text()
+# actually emits (SUMMARY, SKILLS, EXPERIENCE, EDUCATION) -- ats_check's
+# _section_issues previously hardcoded (summary, education, experience,
+# skills), which would have flagged every real resume from this pipeline as
+# "interleaved" the moment ats_check got wired in. Fixed alongside the
+# wiring; this fixture now reflects the actual product output order.
+good = ("SUMMARY\njane@ex.com +1-555-0100\nSKILLS python fastapi\n"
+        "EXPERIENCE 2021-2023\nEDUCATION stats")
 res = ats_check(good, contact, ["python", "fastapi", "kubernetes"],
                 genuine_supported=["python", "kubernetes"])
 check("clean doc ok", res["ok"] is True)

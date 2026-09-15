@@ -635,7 +635,6 @@ def outcome_cmd(
         outcomes_summary,
         promote_draft,
         recalibrate,
-        record_outcome,
     )
     _bootstrap()
     conn = get_connection()
@@ -666,11 +665,28 @@ def outcome_cmd(
         return
 
     if url:
-        from jobpilot.database import get_connection as _gc  # noqa: F401
         if status:
-            record_outcome(conn, url, status=status, source=source, notes=note,
-                           status_date=None)
+            from jobpilot.outcomes import record_outcome_and_notify
+            result = record_outcome_and_notify(conn, url, status=status, note=note, source=source)
             console.print(f"[green]Recorded outcome {status!r} for {url}[/]")
+
+            # Auto-trigger: the moment an outcome is set to "interview", this
+            # is the point the user actually needs an updated CV -- one built
+            # for a human reading it in an F-pattern, not the ATS-tailored
+            # copy that got them the interview in the first place. Runs on
+            # every "interview" outcome call (not just the first), so
+            # re-running `jobpilot outcome <url> -s interview` before a later
+            # round regenerates the CV too. Never blocks recording the
+            # outcome itself -- a CV-generation failure is reported, not fatal.
+            cv = result.get("interview_cv")
+            if cv is not None:
+                if cv.get("ok"):
+                    console.print(f"[green]Interview CV ready:[/] {cv.get('pdf_path') or cv.get('path')}")
+                else:
+                    console.print(
+                        f"[yellow]Interview CV not generated automatically ({cv.get('error', cv.get('status'))}).[/] "
+                        f"Run [bold]jobpilot interview-cv {url}[/bold] to retry by hand."
+                    )
         else:
             o = get_outcome(conn, url)
             if o:
@@ -792,6 +808,36 @@ def interview_cmd(
         console.print(f"     [dim]{q.get('bridge','')}[/dim]")
     for g in pack.get("gaps", []):
         console.print(f"[yellow]  gap: {g.get('topic','')} -> {g.get('honest_bridge','')}[/]")
+
+
+@app.command("interview-cv")
+def interview_cv_cmd(
+    url: str = typer.Argument(..., help="Job URL to build an interview-stage CV for."),
+    notes: str = typer.Option("", "--notes", "-n", help="What you already know about this interview (what landed, feedback, round number) -- used for emphasis, never invented facts."),
+) -> None:
+    """Build a human-facing, F-pattern-formatted CV for a confirmed interview.
+
+    Unlike the ATS-tailored resume `jobpilot run tailor` produces, this version
+    is written for the interviewer who already decided to talk to you --
+    no ATS keyword-stuffing, a top-band positioning line, and bolded outcomes
+    down the left edge for how a human actually scans a page. Saved to
+    ~/.jobpilot/profiles/<active>/interview_resumes/. This runs automatically
+    whenever you record `jobpilot outcome <url> -s interview`; use this command
+    directly to build one by hand or to regenerate one with fresh --notes.
+    """
+    from jobpilot.scoring.interview_resume import generate_interview_cv
+    _bootstrap()
+    result = generate_interview_cv(url, interview_context=notes)
+    if result.get("ok"):
+        console.print(f"[green]Interview CV ready ({result.get('status')}):[/]")
+        console.print(f"  text: {result.get('path')}")
+        if result.get("pdf_path"):
+            console.print(f"  pdf:  {result.get('pdf_path')}")
+        if result.get("docx_path"):
+            console.print(f"  docx: {result.get('docx_path')}")
+    else:
+        console.print(f"[red]Failed:[/] {result.get('error', result.get('status'))}")
+        raise typer.Exit(1)
 
 
 @app.command("upskill")

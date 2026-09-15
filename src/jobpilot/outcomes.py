@@ -166,6 +166,35 @@ def get_outcome(conn: sqlite3.Connection | None, url: str) -> dict | None:
     return d
 
 
+def record_outcome_and_notify(conn: sqlite3.Connection | None, url: str, status: str,
+                              note: str | None = None, source: str = "manual") -> dict:
+    """Record an outcome, and -- if it's "interview" -- fire the desktop
+    notification and build the interview-stage CV. Shared by the CLI
+    (`jobpilot outcome`) and the web dashboard so both trigger the exact same
+    behavior; never blocks recording the outcome itself, a CV-generation
+    failure is reported back, not fatal.
+
+    Returns {"outcome": <row>, "interview_cv": <generate_interview_cv result> | None}.
+    """
+    conn = conn or _connect()
+    outcome_row = record_outcome(conn, url, status=status, source=source, notes=note, status_date=None)
+
+    interview_cv = None
+    if outcome_row["status"] == "interview":
+        from jobpilot.notify import notify
+        notify("Interview confirmed", f"Building your interview CV for {url}...")
+        try:
+            from jobpilot.scoring.interview_resume import generate_interview_cv
+            interview_cv = generate_interview_cv(url, interview_context=note or "", conn=conn)
+        except Exception as e:
+            interview_cv = {"ok": False, "error": str(e)}
+
+        if interview_cv.get("ok"):
+            notify("Interview CV ready", interview_cv.get("pdf_path") or interview_cv.get("path") or "")
+
+    return {"outcome": outcome_row, "interview_cv": interview_cv}
+
+
 def outcomes_summary(conn: sqlite3.Connection | None = None) -> dict:
     """Return outcome counts keyed by canonical status, plus ``total``.
 
