@@ -471,6 +471,7 @@ def web(
     port: int = typer.Option(8765, "--port", "-p", help="Port to serve the web UI on."),
     no_browser: bool = typer.Option(False, "--no-browser", help="Server only -- don't open any window or tab."),
     browser: bool = typer.Option(False, "--browser", help="Open in your default browser tab instead of the native app window."),
+    lan: bool = typer.Option(False, "--lan", help="Bind to all network interfaces so a phone on the same Wi-Fi (the android/ companion app) can reach it. Off by default: this exposes the control API (loop control, LLM settings) to your whole LAN, not just this machine."),
 ) -> None:
     """Launch the JobPilot management UI (view jobs, manage config, control the agent loop).
 
@@ -481,11 +482,26 @@ def web(
 
     from jobpilot.webui import run
 
+    host = "0.0.0.0" if lan else "127.0.0.1"
     console.print(f"\n[bold blue]JobPilot Control[/bold blue] -- http://127.0.0.1:{port}\n")
+    if lan:
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("8.8.8.8", 80))
+            lan_ip = s.getsockname()[0]
+        except OSError:
+            lan_ip = "<your PC's LAN IP>"
+        finally:
+            s.close()
+        console.print(
+            f"[yellow]--lan: also reachable at http://{lan_ip}:{port} from your Wi-Fi. "
+            f"This exposes JobPilot's control API to your whole network, not just this PC.[/]\n"
+        )
     if no_browser:
-        run(port=port, open_browser=False, native=False)
+        run(port=port, open_browser=False, native=False, host=host)
     else:
-        run(port=port, open_browser=browser, native=not browser)
+        run(port=port, open_browser=browser, native=not browser, host=host)
 
 
 @app.command()
