@@ -248,14 +248,27 @@ ISSUES: (list any problems, or "none")
 - Reorder the skills section to put job-relevant skills first
 - Change tone and wording extensively
 
+## THE CANDIDATE'S FULL SKILL SET (the single source of truth for TECHNICAL SKILLS):
+{skills_str}
+
+Every one of these is a REAL, verified skill this candidate has -- confirmed by the
+candidate themselves, not extracted from the resume text. The ORIGINAL RESUME below is
+one old document; it was never guaranteed to mention every skill on this list. A skill
+appearing in TECHNICAL SKILLS is fabrication ONLY if it is ABSENT from the list above.
+Whether or not that same skill happens to appear anywhere in the ORIGINAL RESUME text is
+irrelevant and must NOT factor into your verdict -- do not fail a skill for "not being in
+the original resume" if it is on the list above.
+
 ## WHAT IS FABRICATION (FAIL for these):
-1. Adding tools, languages, or frameworks to TECHNICAL SKILLS that aren't in the original. The allowed skills are ONLY: {skills_str}
+1. A tool, language, or framework in TECHNICAL SKILLS that is NOT on the skill set list above.
 2. Inventing NEW metrics or numbers not in the original. The real metrics are: {metrics_str}
 3. Inventing work that has no basis in any original bullet (completely new achievements).
 4. Adding companies, roles, or degrees that don't exist.
 5. Changing real numbers (inflating 80% to 95%, 500 nodes to 1000 nodes).
 
 ## WHAT IS NOT FABRICATION (do NOT fail for these):
+- Any skill from the skill set list above appearing in TECHNICAL SKILLS, even if that
+  exact skill is never mentioned anywhere in the ORIGINAL RESUME text
 - Rewording any bullet, even heavily, as long as the underlying work is real
 - Combining two original bullets into one
 - Splitting one original bullet into two
