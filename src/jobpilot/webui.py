@@ -1025,8 +1025,32 @@ def create_app() -> Flask:
     return app
 
 
-def run(port: int = 8765, open_browser: bool = True) -> None:
+def run(port: int = 8765, open_browser: bool = True, native: bool = True) -> None:
+    """Serve the dashboard.
+
+    Default is a native desktop window (pywebview, backed by Edge WebView2 on
+    Windows) -- no address bar, no tabs, doesn't look or feel like a browser.
+    Falls back to `open_browser`'s plain-tab behavior if `native=False` or
+    pywebview isn't installed.
+    """
     app = create_app()
+
+    if native:
+        try:
+            import webview
+        except ImportError:
+            native = False
+
+    if native:
+        import threading
+        threading.Thread(
+            target=lambda: app.run(host="127.0.0.1", port=port, debug=False, threaded=True, use_reloader=False),
+            daemon=True,
+        ).start()
+        webview.create_window("JobPilot", f"http://127.0.0.1:{port}", width=1280, height=850, min_size=(900, 600))
+        webview.start()
+        return
+
     if open_browser:
         import threading
         import webbrowser

@@ -469,15 +469,23 @@ def dashboard() -> None:
 @app.command()
 def web(
     port: int = typer.Option(8765, "--port", "-p", help="Port to serve the web UI on."),
-    no_browser: bool = typer.Option(False, "--no-browser", help="Don't auto-open a browser tab."),
+    no_browser: bool = typer.Option(False, "--no-browser", help="Server only -- don't open any window or tab."),
+    browser: bool = typer.Option(False, "--browser", help="Open in your default browser tab instead of the native app window."),
 ) -> None:
-    """Launch the JobPilot management web UI (view jobs, manage config, control the agent loop)."""
+    """Launch the JobPilot management UI (view jobs, manage config, control the agent loop).
+
+    Opens as a standalone desktop window by default. Pass --browser for a
+    plain browser tab instead (e.g. to use browser devtools).
+    """
     _bootstrap()
 
     from jobpilot.webui import run
 
     console.print(f"\n[bold blue]JobPilot Control[/bold blue] -- http://127.0.0.1:{port}\n")
-    run(port=port, open_browser=not no_browser)
+    if no_browser:
+        run(port=port, open_browser=False, native=False)
+    else:
+        run(port=port, open_browser=browser, native=not browser)
 
 
 @app.command()
