@@ -134,7 +134,13 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
             -- Scam detection stage
             scam_verdict          TEXT,
             scam_reasons          TEXT,
-            scam_checked_at       TEXT
+            scam_checked_at       TEXT,
+
+            -- Competitiveness gate (applicant-count saturation)
+            applicant_count          INTEGER,
+            applicant_checked_at     TEXT,
+            competitiveness_verdict  TEXT,
+            competitiveness_reason   TEXT
         )
     """)
     conn.execute("""
@@ -203,6 +209,11 @@ _ALL_COLUMNS: dict[str, str] = {
     "scam_verdict": "TEXT",
     "scam_reasons": "TEXT",
     "scam_checked_at": "TEXT",
+    # Competitiveness gate (applicant-count saturation)
+    "applicant_count": "INTEGER",
+    "applicant_checked_at": "TEXT",
+    "competitiveness_verdict": "TEXT",
+    "competitiveness_reason": "TEXT",
 }
 
 
@@ -367,6 +378,15 @@ def get_stats(conn: sqlite3.Connection | None = None) -> dict:
         "AND application_url IS NOT NULL"
     ).fetchone()[0]
 
+    # Competitiveness gate (applicant-count saturation)
+    stats["with_applicant_count"] = conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE applicant_count IS NOT NULL"
+    ).fetchone()[0]
+
+    stats["retired_saturated"] = conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE competitiveness_verdict = 'retired'"
+    ).fetchone()[0]
+
     return stats
 
 
@@ -439,12 +459,14 @@ def get_jobs_by_stage(conn: sqlite3.Connection | None = None,
         "pending_score": (
             "full_description IS NOT NULL AND fit_score IS NULL "
             "AND (scam_verdict IS NULL OR scam_verdict != 'blocked')"
+            " AND (competitiveness_verdict IS NULL OR competitiveness_verdict != 'retired')"
         ),
         "scored": "fit_score IS NOT NULL",
         "pending_tailor": (
             "fit_score >= ? AND full_description IS NOT NULL "
             "AND tailored_resume_path IS NULL AND COALESCE(tailor_attempts, 0) < 5 "
             "AND (scam_verdict IS NULL OR scam_verdict != 'blocked')"
+            " AND (competitiveness_verdict IS NULL OR competitiveness_verdict != 'retired')"
         ),
         "tailored": "tailored_resume_path IS NOT NULL",
         "pending_apply": (
