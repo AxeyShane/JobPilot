@@ -540,7 +540,7 @@ async def _drive_agent(job: dict, port: int, worker_id: int, dry_run: bool) -> t
     server_params = StdioServerParameters(
         command=_mcp_command(),
         args=[
-            "@playwright/mcp@latest",
+            "@playwright/mcp@0.0.81",
             f"--cdp-endpoint=http://localhost:{port}",
             f"--viewport-size={config.DEFAULTS['viewport']}",
         ],

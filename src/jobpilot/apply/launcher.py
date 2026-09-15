@@ -86,7 +86,7 @@ def _make_mcp_config(cdp_port: int) -> dict:
             "playwright": {
                 "command": npx,
                 "args": [
-                    "@playwright/mcp@latest",
+                    "@playwright/mcp@0.0.81",
                     f"--cdp-endpoint=http://localhost:{cdp_port}",
                     f"--viewport-size={config.DEFAULTS['viewport']}",
                 ],

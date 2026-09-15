@@ -480,10 +480,16 @@ def web(
     """
     _bootstrap()
 
+    from jobpilot import webui
     from jobpilot.webui import run
 
     host = "0.0.0.0" if lan else "127.0.0.1"
     console.print(f"\n[bold blue]JobPilot Control[/bold blue] -- http://127.0.0.1:{port}\n")
+    console.print(
+        f"[dim]API token for this session (only needed for direct API calls, "
+        f"e.g. curl -H 'X-JobPilot-Token: {webui._TOKEN}' ...; the app's own "
+        f"page carries this automatically): {webui._TOKEN}[/]\n"
+    )
     if lan:
         import socket
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

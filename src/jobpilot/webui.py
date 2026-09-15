@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import subprocess
 import sys
 from pathlib import Path
@@ -23,6 +24,16 @@ from jobpilot.database import get_connection, get_stats, init_db
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENT_SCRIPT = REPO_ROOT / "scripts" / "agent_loop.ps1"
+
+# Every /api/* route is otherwise wide open: no login, no accounts, nothing
+# to configure. Fine when the server only ever listened on 127.0.0.1 (only
+# processes already on this machine could reach it) -- not fine now that
+# --lan exists, since anyone on the same Wi-Fi could otherwise read job data,
+# overwrite the LLM API key, or flip live/auto-apply mode remotely. A random
+# per-process token, checked on every /api/* request and transparently
+# injected into the page this app itself serves, closes that without asking
+# the user to manage credentials -- the page carries its own key.
+_TOKEN = secrets.token_urlsafe(32)
 VENV_JOBPILOT = REPO_ROOT / ".venv" / "Scripts" / "jobpilot.exe"
 LIVE_FLAG_PATH = cfg.APP_DIR / "live.flag"
 ENGINE_FLAG_PATH = cfg.APP_DIR / "engine.flag"
@@ -343,11 +354,32 @@ def create_app() -> Flask:
     from jobpilot.outcomes import init_outcomes
     init_outcomes(get_connection())
 
+    @app.before_request
+    def _require_token():
+        if request.path.startswith("/api/") and request.headers.get("X-JobPilot-Token") != _TOKEN:
+            return jsonify({"error": "unauthorized"}), 403
+
     # -- pages --
 
     @app.get("/")
     def index():
-        return PAGE_HTML
+        return PAGE_HTML.replace(
+            "<script>\nfunction $(id)",
+            f'<script>\nwindow.__JOBPILOT_TOKEN__ = "{_TOKEN}";\n'
+            "(function() {\n"
+            "  const _fetch = window.fetch;\n"
+            "  window.fetch = function(input, init) {\n"
+            "    const url = typeof input === 'string' ? input : (input && input.url) || '';\n"
+            "    if (url.startsWith('/api/')) {\n"
+            "      init = Object.assign({}, init);\n"
+            "      init.headers = Object.assign({}, init.headers, {'X-JobPilot-Token': window.__JOBPILOT_TOKEN__});\n"
+            "    }\n"
+            "    return _fetch(input, init);\n"
+            "  };\n"
+            "})();\n"
+            "function $(id)",
+            1,
+        )
 
     # -- stats / jobs --
 
