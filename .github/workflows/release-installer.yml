@@ -1,0 +1,34 @@
+name: Release Windows Installer
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-installer:
+    runs-on: windows-latest
+    permissions:
+      contents: write  # to create the release and attach the installer
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y
+
+      - name: Build JobPilotSetup.exe
+        shell: powershell
+        run: powershell -ExecutionPolicy Bypass -File installer\build_installer.ps1
+
+      - name: Attach installer to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/JobPilotSetup-*.exe
+          generate_release_notes: true
