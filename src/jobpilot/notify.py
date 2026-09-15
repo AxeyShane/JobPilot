@@ -399,6 +399,25 @@ def format_event(kind: str, **fields: Any) -> dict[str, Any]:
             "tags": ["warning", "x"],
         }
 
+    if kind == "email_verification":
+        job = fields.get("job") if isinstance(fields.get("job"), dict) else {}
+        title_text = fields.get("title") or job.get("title") or "a job application"
+        company = fields.get("company") or job.get("company") or job.get("site") or ""
+        launch = str(
+            fields.get("url") or fields.get("application_url") or job.get("url") or job.get("application_url") or ""
+        )
+
+        title = f"Verification code incoming: {company}" if company else "Verification code incoming"
+        message = f"JobPilot is signing in/up for {title_text}" + (f" at {company}" if company else "") + " -- expect an email code any second"
+        return {
+            "title": title,
+            "message": message,
+            "subtitle": company,
+            "launch": launch,
+            "priority": 3,  # default
+            "tags": ["envelope", "key"],
+        }
+
     if kind == "scam_blocked":
         job = fields.get("job") if isinstance(fields.get("job"), dict) else {}
         title_text = fields.get("title") or job.get("title") or "Job posting"
@@ -474,6 +493,7 @@ def notify_event(kind: str, **fields: Any) -> dict[str, bool]:
         'new_match': Fresh high-fit job match (single job or batch count)
         'applied': Job application submitted
         'apply_failed': Job application failed
+        'email_verification': Apply agent is fetching an email verification/OTP code
         'scam_blocked': Scam posting detected and blocked
         'run_summary': Pipeline execution summary
 

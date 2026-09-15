@@ -22,7 +22,7 @@ from pathlib import Path
 from rich.console import Console
 from rich.live import Live
 
-from jobpilot import config
+from jobpilot import config, notify
 from jobpilot.database import get_connection
 from jobpilot.apply import chrome, dashboard, prompt as prompt_mod
 from jobpilot.apply.result import extract_result, is_permanent_failure
@@ -173,6 +173,7 @@ def acquire_job(target_url: str | None = None, min_score: int = 6,
                   AND (apply_attempts IS NULL OR apply_attempts < ?)
                   AND fit_score >= ?
                   AND (scam_verdict = 'clear' OR strategy = 'workday_api')
+                  AND (competitiveness_verdict IS NULL OR competitiveness_verdict != 'retired')
                   {site_clause}
                   {url_clauses}
                 -- Freshness-first apply queue:
@@ -468,6 +469,7 @@ def run_job(job: dict, port: int, worker_id: int = 0,
         proc.stdin.close()
 
         text_parts: list[str] = []
+        verification_notified = False
         with open(worker_log, "a", encoding="utf-8") as lf:
             lf.write(log_header)
 
@@ -490,6 +492,30 @@ def run_job(job: dict, port: int, worker_id: int = 0,
                                     .replace("mcp__playwright__", "")
                                     .replace("mcp__gmail__", "gmail:")
                                 )
+
+                                # The agent reaches into the real inbox to pull a
+                                # signup/login verification code (see prompt.py
+                                # step 5f). That produces a "your code is 123456"
+                                # email from whatever ATS is in play (Workday,
+                                # Greenhouse, SmartRecruiters, ...) with nothing
+                                # in it saying which job triggered it. Fire a
+                                # notification the moment the agent reaches for
+                                # email, tying it back to this job/company while
+                                # the context is still fresh -- once per job run.
+                                if not verification_notified and name in (
+                                    "gmail:search_emails", "gmail:read_email",
+                                ):
+                                    verification_notified = True
+                                    try:
+                                        notify.notify_event(
+                                            "email_verification",
+                                            title=job["title"],
+                                            company=job.get("site", ""),
+                                            url=job.get("application_url") or job["url"],
+                                        )
+                                    except Exception:
+                                        logger.debug("email_verification notify failed", exc_info=True)
+
                                 inp = block.get("input", {})
                                 if "url" in inp:
                                     desc = f"{name} {inp['url'][:60]}"

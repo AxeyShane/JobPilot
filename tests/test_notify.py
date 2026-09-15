@@ -147,6 +147,27 @@ def test_formatting_apply_failed():
 test_formatting_apply_failed()
 
 
+def test_formatting_email_verification():
+    fmt = format_event(
+        "email_verification",
+        title="Senior Backend Engineer",
+        company="Acme Corp",
+        url="https://acme.greenhouse.io/jobs/123",
+    )
+    check("email_verification: title names the company", "Acme Corp" in fmt["title"])
+    check("email_verification: message names the job and company", "Senior Backend Engineer" in fmt["message"] and "Acme Corp" in fmt["message"])
+    check("email_verification: launch URL", fmt["launch"] == "https://acme.greenhouse.io/jobs/123")
+    check("email_verification: tags contain envelope", "envelope" in fmt["tags"])
+
+    # No company known -- title/message still make sense without a dangling "at ".
+    fmt2 = format_event("email_verification", title="Platform Engineer", url="")
+    check("email_verification: no-company title", fmt2["title"] == "Verification code incoming")
+    check("email_verification: no-company message has no trailing 'at'", " at " not in fmt2["message"])
+
+
+test_formatting_email_verification()
+
+
 def test_formatting_scam_blocked():
     fmt = format_event(
         "scam_blocked",
