@@ -31,7 +31,8 @@ discipline layer on top of the autonomous pipeline.
 | **Closed outcome loop** — records interview/offer/rejection and recalibrates scoring from real results | applying into a void with no feedback |
 | **ATS-safe documents** — the final PDF's text layer is verified the way a parser reads it | "looks fine in the .tex", broken in the ATS |
 | **Hostile-posting defense** — job ads are data, never instructions | letting a crafted job ad steer the agent |
-| **Interview + skill-gap tools** — STAR-bridge prep and a learning plan | stopping the moment you hit submit |
+| **Interview + skill-gap tools** — STAR-bridge prep, a learning plan, and once an interview is confirmed a second F-pattern CV written for a human reader, not a parser | stopping the moment you hit submit |
+| **Standalone control app** — `jobpilot web` opens as a native desktop window, not a browser tab | another tab lost in the pile |
 
 Every feature is honest by construction: **it never fabricates skills,
 experience, or metrics** — genuine gaps stay visible as gaps.
@@ -48,7 +49,14 @@ jobpilot init          # one-time setup: profile, resume, preferences, LLM key
 jobpilot doctor        # verify everything is in place
 jobpilot run           # discover > enrich > score > tailor > cover letters
 jobpilot apply         # autonomous browser submission (optional)
+jobpilot web           # standalone control app: jobs, outcomes, loop control
 ```
+
+`jobpilot web` opens as its own desktop window (pywebview + WebView2 on
+Windows) — no address bar, no tabs, not a browser tab you'll lose in a pile
+of others. Pass `--browser` if you specifically want the old plain-tab
+behavior (e.g. to use browser devtools), or `--no-browser` to run the
+control server headless.
 
 One **OpenRouter** key powers the whole pipeline (`openrouter.ai/keys` — free
 tier works). Gemini, OpenAI, and local llama.cpp/Ollama endpoints are also
@@ -58,6 +66,27 @@ supported. See [Configuration](#configuration) for per-stage model routing.
 > in its metadata that conflicts with pip's resolver but runs fine with modern
 > numpy. The `--no-deps` flag bypasses the resolver; the second command
 > installs jobspy's actual runtime dependencies.
+
+**Prefer a double-click over a terminal?** `installer/` has a PyInstaller +
+Inno Setup pipeline (ported from Prospector's, the same shape this
+portfolio already ships) that builds a standalone `JobPilotSetup.exe` --
+no Python needed on the machine running it:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File installer\build_installer.ps1
+```
+
+Not yet published as a release download -- build it yourself for now, and
+budget a little debugging time on the first run: this is the first time
+`playwright` and `crawl4ai` have been frozen with PyInstaller in this
+portfolio. The packaged app opens as its own desktop window, no browser
+needed; auto-apply needs a one-time `playwright install chromium` the app
+will prompt for.
+
+**Reviewing from your phone:** `android/` is a thin WebView client for the
+dashboard, same pattern as TechRadar's -- it needs JobPilot already
+running somewhere reachable, it doesn't run JobPilot itself. See
+`android/README.md`.
 
 ---
 
@@ -167,6 +196,7 @@ jobpilot outcome --list            # where every application stands
 jobpilot outcome --recalibrate     # feed real results back into scoring
 jobpilot outcome --promote url=sig # drafted -> applied on an ack signal
 jobpilot interview --company X --posting TXT   # STAR-bridge prep pack
+jobpilot interview-cv <url>        # human-facing CV once an interview is confirmed
 jobpilot upskill --text <post>     # skill-gap analysis + learning plan
 
 jobpilot apply                     # autonomous browser submission
@@ -174,7 +204,8 @@ jobpilot apply --dry-run           # fill forms, don't submit
 jobpilot apply --url URL           # apply to one specific job
 jobpilot watch                     # fast lane: poll, alert, prep, hold
 jobpilot status                    # pipeline statistics
-jobpilot dashboard                 # HTML dashboard
+jobpilot web                       # standalone control app (native window by default)
+jobpilot dashboard                 # static HTML report, opened in your browser
 ```
 
 ### Auto-apply: the honest current state
