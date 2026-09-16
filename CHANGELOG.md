@@ -7,6 +7,116 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - 2026-08-30 (part 3: applicant-count competitiveness gate)
+- **New `jobpilot.competitiveness_gate` module.** LinkedIn (and some ATS
+  pages) show a running applicant count on the detail page. A screener works
+  that queue roughly in arrival order and stops well short of the bottom
+  once volume gets high, so a posting already at/over `JOBPILOT_MAX_APPLICANTS`
+  (default 30) is very unlikely to get a first look from a fresh
+  application, however well it's tailored. `parse_applicant_count()` reads
+  the "N applicants" / "Over N applicants" / "N+ applicants" / "N people
+  clicked apply" phrasing off the rendered page (and correctly treats "Be
+  among the first N applicants" as a low-count signal, not a count of N);
+  `evaluate_competitiveness()` turns that into an `ok` / `retired` verdict.
+  Fails open: a job with no visible applicant count is never gated.
+- **Wired into detail enrichment.** `enrichment/detail.py` reads the
+  applicant count once per detail page (independent of which description
+  extraction tier succeeds) and writes `applicant_count`,
+  `applicant_checked_at`, `competitiveness_verdict`, `competitiveness_reason`
+  to the `jobs` table. A `retired` verdict sets `apply_status='retired'`
+  (only when nothing has claimed apply_status already, so it can never
+  clobber a real apply outcome).
+- **Retired jobs are skipped, not just labeled.** `database.get_jobs_by_stage`
+  excludes `competitiveness_verdict='retired'` from `pending_score` and
+  `pending_tailor`; `cover_letter.run_cover_letters()` and
+  `apply/launcher.acquire_job()`'s queue query do the same -- so a
+  saturated posting stops consuming scoring/tailoring/cover-letter LLM
+  calls and never reaches the auto-apply queue. A direct apply-by-URL
+  request still bypasses this (manual override for one specific job you
+  choose), matching the existing scam-gate precedent for the general queue
+  vs. a targeted retry.
+- **`jobpilot health` and the web dashboard** both report a "retired as
+  saturated" count alongside the existing "retired as manual" one.
+  New endpoints `GET /api/jobs/retired` (list) and `POST
+  /api/jobs/unretire` (manual override, mirrors the scam-gate
+  clear/report pair) let you see and reverse individual retirements.
+- **`tests/test_competitiveness_gate.py`** -- 13 tests covering count
+  parsing (plain/over/plus/clicked-apply/ceiling-phrase/missing-signal) and
+  threshold evaluation.
+- Configurable via `JOBPILOT_MAX_APPLICANTS` (documented in `.env.example`);
+  defaults to 30.
+
+### Added / Fixed - 2026-08-30 (part 2: metric density, proof-of-work links, one-click scam flag)
+- **Metric-density enforcement.** New METRIC DENSITY section in the tailor
+  prompt targets 80% of bullets carrying a real quantified result (grounded
+  in eye-tracking research: dense prose gets skipped in a scan, a number
+  gets a fixation). Enforced in code too via `compute_metric_density()` --
+  soft gate at 50% so a role with genuinely few quantifiable bullets never
+  burns every retry chasing a number that doesn't exist. New status
+  `approved_low_metric_density`.
+- **Architecture-over-tool-list bullet guidance.** New prompt section asks
+  for "how the pieces connect and why" instead of a tool list on any
+  multi-component bullet -- tool names belong in TECHNICAL SKILLS, the
+  bullet's job is to show the decision.
+- **Optional `resume_facts.project_links`** (`{"Project Name": "url"}`).
+  When present, the tailored project's subtitle carries its real repo link
+  instead of the link only living in the header contact line where a fast
+  technical read can miss it. Documented in `profile.example.json`.
+- **Scam-flag button is now a true single click.** `reportScamPrompt()` in
+  the dashboard opened a blocking `prompt()` dialog for an optional note
+  before submitting to the already-built `/api/jobs/report-scam` endpoint --
+  the backend, the button, and the endpoint all existed, but the dialog
+  meant one click was actually two steps. Removed the dialog; the button now
+  flags and blocks the job immediately, recoverable via the existing "Clear
+  Flag" button if it was a misclick.
+- **Verified no personal profile data has ever reached the repo or its
+  history**: `profile.json`/`.jobpilot/`/`resume.txt` are gitignored,
+  `profile.example.json` is a clean placeholder template, and a full-history
+  search for the user's real contact details turned up nothing.
+
+### Added / Fixed - 2026-08-30 (resume pipeline hardening, ApplyPilot retirement)
+- **`jobpilot.quality` finally wired into the tailoring pipeline.** This module
+  shipped fully built (ATS text-layer check, reviewer pass, revise) with a
+  docstring saying "another agent wires these into the pipeline later" and sat
+  unused. `scoring/tailor.py`'s retry loop now runs `ats_check` (Layer 4) after
+  the LLM judge -- contact literals extractable, no ransom glyphs, sane section
+  order, honest keyword-gap reporting -- and retries with specific feedback on
+  failure, same pattern as the existing fabrication/banned-word layers.
+- **Fixed a section-order bug in `quality._section_issues`** that would have
+  flagged every single resume this pipeline generates as "interleaved": it
+  hardcoded (summary, education, experience, skills) as the expected order,
+  but `assemble_resume_text()` always emits (summary, skills, experience,
+  education). Caught immediately by running `ats_check` against real
+  assembled output for the first time. `tests/test_quality.py`'s fixture
+  updated to match.
+- **`validate_tailored_resume` (full-text structural validation) was imported
+  into `scoring/tailor.py` on day one and never called.** Now runs as Layer 3
+  of the retry loop: duplicate-section detection, an em/en-dash safety net,
+  contact-info-preserved checks, on the assembled text itself rather than
+  only the pre-assembly JSON.
+- **Page-fit enforcement.** The tailor prompt has always said "must fit 1
+  page," but nothing checked it -- a verbose LLM response could silently spill
+  to page 2. Layer 5 now renders the candidate resume to a temp PDF, counts
+  pages (`pypdf`, new dependency), and retries with a trim instruction if it
+  doesn't fit, before falling back to an `approved_over_one_page` status that
+  still gets a PDF/DOCX rather than being silently dropped.
+- **Fixed a contact-line regression vs. ApplyPilot**: `assemble_resume_text`
+  dropped `website_url`/`portfolio_url` from the header contact line during
+  the fork. Restored, so a resume now correctly includes a portfolio site
+  when the profile has one.
+- New report keys per tailoring attempt: `structural`, `ats`, `page_count`.
+  New terminal statuses: `approved_with_structural_warning`,
+  `approved_with_ats_warning`, `approved_over_one_page` -- all treated as
+  successes for PDF/DOCX generation and DB bookkeeping, distinct from
+  `approved`/`approved_with_judge_warning` so a flagged-but-shipped resume is
+  visible in the logs rather than indistinguishable from a clean one.
+- Verified end-to-end against a mocked LLM client (five-layer retry loop
+  exercised with a fabricated fresh conversation each attempt) and the
+  existing `tests/test_quality.py` suite (29/29 passing after the section-
+  order fix). Full integration testing (real LLM, real Playwright/Chromium
+  render) still needs to happen in the native environment -- this pass ran
+  from a sandboxed bridge VM without playwright installed.
+
 ### Added - 2026-08-25 (post-fork polish)
 - **First-class OpenRouter support** — `OPENROUTER_API_KEY` is now the
   primary provider (default model `google/gemini-2.5-flash-lite`), wired

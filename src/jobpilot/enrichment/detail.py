@@ -369,6 +369,24 @@ def extract_description_deterministic(page) -> str | None:
     return None
 
 
+def extract_applicant_count(page) -> int | None:
+    """Read a LinkedIn/ATS-style applicant count off the rendered page.
+
+    Cheap text scan (not tied to any one tier of the description cascade) --
+    the "N applicants" line lives in the page chrome around the title, not
+    inside the description block, so it's read once per detail page
+    regardless of which description tier ends up succeeding. See
+    jobpilot.competitiveness_gate for what the number is used for.
+    """
+    try:
+        text = page.evaluate("() => document.body.innerText") or ""
+    except Exception:
+        return None
+
+    from jobpilot.competitiveness_gate import parse_applicant_count
+    return parse_applicant_count(text[:20000])
+
+
 # -- Tier 3: LLM extraction -------------------------------------------------
 
 DETAIL_EXTRACT_PROMPT = """You are extracting job details from a single job posting page.
@@ -515,6 +533,7 @@ def scrape_detail_page(page, url: str) -> dict:
     result: dict = {
         "full_description": None,
         "application_url": None,
+        "applicant_count": None,
         "status": "error",
         "tier_used": None,
         "error": None,
@@ -542,6 +561,7 @@ def scrape_detail_page(page, url: str) -> dict:
         return result
 
     intel = collect_detail_intelligence(page)
+    result["applicant_count"] = extract_applicant_count(page)
 
     # Tier 1: JSON-LD
     json_ld_result = extract_from_json_ld(intel)
@@ -700,6 +720,32 @@ def scrape_site_batch(
                     conn.execute(
                         "UPDATE jobs SET detail_error = ?, detail_scraped_at = ? WHERE url = ?",
                         (result.get("error", "unknown"), now, url),
+                    )
+
+                # Competitiveness gate: runs regardless of description-tier
+                # outcome, since the applicant count is read from page chrome
+                # independent of the description cascade above. A retired
+                # verdict auto-excludes the job from scoring/tailoring/cover
+                # (database.py get_jobs_by_stage) and from the apply queue
+                # (apply_status='retired' fails both acquire_job filters) --
+                # but only if nothing has claimed apply_status already, so
+                # this never clobbers a real apply outcome.
+                applicant_count = result.get("applicant_count")
+                from jobpilot.competitiveness_gate import evaluate_competitiveness
+                comp = evaluate_competitiveness(applicant_count)
+                if applicant_count is not None:
+                    if comp.verdict == "retired":
+                        log.info("Competitiveness gate RETIRED %s: %s", url, comp.reason)
+                    conn.execute(
+                        "UPDATE jobs SET applicant_count = ?, applicant_checked_at = ?, "
+                        "competitiveness_verdict = ?, competitiveness_reason = ?, "
+                        "apply_status = CASE WHEN ? = 'retired' AND apply_status IS NULL "
+                        "THEN 'retired' ELSE apply_status END, "
+                        "apply_error = CASE WHEN ? = 'retired' AND apply_status IS NULL "
+                        "THEN ? ELSE apply_error END "
+                        "WHERE url = ?",
+                        (applicant_count, now, comp.verdict, comp.reason,
+                         comp.verdict, comp.verdict, comp.reason, url),
                     )
 
                 conn.commit()

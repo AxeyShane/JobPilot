@@ -200,6 +200,7 @@ def collect() -> dict:
                               "AND fit_score IS NULL"),
         "acquirable": acquirable,
         "manual": q("SELECT COUNT(*) FROM jobs WHERE apply_status = 'manual'"),
+        "retired_saturated": q("SELECT COUNT(*) FROM jobs WHERE competitiveness_verdict = 'retired'"),
     }
 
     # Recent fast-lane matches, from the JSONL worklist.
@@ -250,6 +251,8 @@ def report() -> dict:
     console.print(f"  acquirable to apply: [bold]{c['acquirable']}[/bold]   "
                   f"[dim](blocked sites excluded -- the dashboard's count is not)[/dim]")
     console.print(f"  retired as manual  : {c['manual']}")
+    console.print(f"  retired as saturated: {c['retired_saturated']}   "
+                  f"[dim](>= {os.environ.get('JOBPILOT_MAX_APPLICANTS', '30')} applicants already, skipped)[/dim]")
 
     if data["matches"]:
         m = Table(title="Recent fast-lane matches (prepared, awaiting you)", title_style="bold")

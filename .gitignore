@@ -49,8 +49,21 @@ Thumbs.db
 .jobpilot/
 # Internal dev coordination note (not part of the product)
 _DEV_CONTEXT.md
+
+# Claude brief / notes files (discussion artifacts, not part of the product)
+jobpilot-*-brief.md
+jobpilot-*-notes.md
 # Local dev launcher / logs (not part of the product)
 run_web*.py
 jobpilot_web.log
 jobpilot_web.err
 jobpilot_verify.log
+
+# Android companion app build output / debug signing key
+android/build/
+*.keystore
+
+# PyInstaller / Inno Setup output for the Windows installer
+dist/
+.build-venv/
+installer/__pycache__/

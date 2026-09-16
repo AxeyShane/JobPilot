@@ -35,6 +35,13 @@ IMPORTANT FACTORS:
 - Consider transferable experience (automation, scripting, API work)
 - Factor in the candidate's project experience
 - Be realistic about experience level vs. job requirements (years of experience, seniority)
+- Niche boost: if a posting asks for BOTH real-time 3D character tech (Unreal
+  Engine, Unity, MetaHuman, digital human, virtual human, avatar, NPC, XR/VR/AR,
+  immersive) AND AI/conversational systems (LLM, conversational AI, generative
+  AI, multi-agent, LangGraph, LangChain, agentic, AI-driven behavior) -- score
+  it a full tier higher than a posting hitting only one side. This combination
+  is rare and matches the candidate's strongest, most specific experience;
+  don't just add the two signals, treat the overlap itself as the strong signal.
 
 RESPOND IN EXACTLY THIS FORMAT (no other text):
 SCORE: [1-10]

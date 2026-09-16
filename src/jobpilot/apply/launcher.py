@@ -173,6 +173,7 @@ def acquire_job(target_url: str | None = None, min_score: int = 6,
                   AND (apply_attempts IS NULL OR apply_attempts < ?)
                   AND fit_score >= ?
                   AND (scam_verdict = 'clear' OR strategy = 'workday_api')
+                  AND (competitiveness_verdict IS NULL OR competitiveness_verdict != 'retired')
                   {site_clause}
                   {url_clauses}
                 -- Freshness-first apply queue:

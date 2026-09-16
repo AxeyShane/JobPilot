@@ -213,3 +213,16 @@ sites:
   - name: "Otta"
     url: "https://otta.com/jobs/all?title=software+engineer&remote=true"
     type: search
+
+  # ── Game-industry boards (catch XR/character-AI roles that skip generic tech boards) ──
+  - name: "Hitmarker"
+    url: "https://hitmarker.net/jobs?query={query_encoded}"
+    type: search
+
+  - name: "Games Jobs Direct"
+    url: "https://www.gamesjobsdirect.com/search-results-jobs/?q={query_encoded}"
+    type: search
+
+  - name: "ArtStation Jobs"
+    url: "https://www.artstation.com/jobs/search?query={query_encoded}"
+    type: search

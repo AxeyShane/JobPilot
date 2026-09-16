@@ -286,6 +286,7 @@ def run_cover_letters(min_score: int = 6, limit: int = 0,
         "AND (cover_letter_path IS NULL OR cover_letter_path = '') "
         "AND COALESCE(cover_attempts, 0) < ? "
         "AND (scam_verdict IS NULL OR scam_verdict != 'blocked')"
+        " AND (competitiveness_verdict IS NULL OR competitiveness_verdict != 'retired')"
     )
     params: list = [min_score, MAX_ATTEMPTS]
     if urls:
