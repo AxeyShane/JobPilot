@@ -90,7 +90,8 @@ def _jobpilot_child_alive() -> bool | None:
         import subprocess
 
         out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq jobpilot.exe"],
-                             capture_output=True, text=True, timeout=10).stdout
+                             capture_output=True, text=True, timeout=10,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
         return "jobpilot.exe" in out
     except Exception:  # noqa: BLE001
         return None
