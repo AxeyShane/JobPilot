@@ -91,6 +91,10 @@ def _run_ps(script: str) -> bool:
             text=True,
             timeout=_TOAST_TIMEOUT,
             check=False,
+            # The packaged desktop app has no console of its own -- without
+            # this, every toast (and there can be many) flashes a fresh
+            # console window open and closed.
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         if proc.returncode != 0:
             log.debug("Notification backend failed (rc=%s): %s", proc.returncode, (proc.stderr or "").strip()[:300])

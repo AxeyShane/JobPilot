@@ -100,11 +100,17 @@ def _pid_alive(pid_path: Path) -> int | None:
         pid = int(pid_path.read_text(encoding="utf-8").strip())
     except ValueError:
         return None
-    # Confirm it's actually alive (Windows: query via tasklist)
+    # Confirm it's actually alive (Windows: query via tasklist). This is
+    # polled every few seconds by the Home tab -- CREATE_NO_WINDOW matters
+    # here specifically: the packaged desktop app has no console of its own
+    # (jobpilot.spec sets console=False), so every tasklist call would
+    # otherwise flash a fresh console window open and closed, repeatedly,
+    # for as long as the app is on screen.
     try:
         out = subprocess.run(
             ["tasklist", "/FI", f"PID eq {pid}"],
             capture_output=True, text=True, timeout=10,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         ).stdout
         if str(pid) in out:
             return pid
@@ -141,6 +147,7 @@ def _any_jobpilot_child_alive() -> bool:
         out = subprocess.run(
             ["tasklist", "/FI", "IMAGENAME eq jobpilot.exe"],
             capture_output=True, text=True, timeout=10,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         ).stdout
         return "jobpilot.exe" in out
     except Exception:
@@ -272,7 +279,7 @@ def _stop_loop() -> None:
     pid = _loop_pid()
     if pid is None:
         return
-    subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True)
+    subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     PID_PATH.unlink(missing_ok=True)
 
 
@@ -338,7 +345,7 @@ def _stop_pipeline_run() -> None:
     pid = _pipeline_pid()
     if pid is None:
         return
-    subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True)
+    subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     PIPELINE_PID_PATH.unlink(missing_ok=True)
 
 
